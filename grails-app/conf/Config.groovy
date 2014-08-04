@@ -2,6 +2,8 @@ grails.app.context = '/'
 
 broker.v2.publicip = true
 broker.v2.secret = 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
+broker.v2.backend = 'coreos' // 'coreos' or 'docker'
+broker.v2.coreoshost = 'core1'
 
 // locations to search for config files that get merged into the main config;
 // config files can be ConfigSlurper scripts, Java properties files, or classes
