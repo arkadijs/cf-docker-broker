@@ -15,10 +15,10 @@ gcutil addinstance \
 gcutil adddisk --disk_type=pd-standard --size_gb=10 --zone=$zone $(coreos_swap_disks)
 
 for i in $(seq 1 $nr_nodes); do
-    gcutil attachdisk --disk=core$i-swap --zone=$zone core$i &
-    sleep 1
+    gcutil attachdisk --disk=$(coreos_swap_disk $i) --zone=$zone $(coreos_node $i) &
+    sleep 0.5
 done
 
 wait
 
-echo "\nYour CoreOS cluster is ready!\nDo 'export FLEETCTL_ENDPOINT=http://core1:4001' now.\nBuild 'fleetctl' from https://github.com/coreos/fleet\nBuild 'etcdctl' from https://github.com/coreos/etcdctl"
+echo "\nYour CoreOS cluster is ready!\nDo 'export FLEETCTL_ENDPOINT=http://core${index:+$index-}1:4001' now.\nBuild 'fleetctl' from https://github.com/coreos/fleet\nBuild 'etcdctl' from https://github.com/coreos/etcdctl"

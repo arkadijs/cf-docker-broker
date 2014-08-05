@@ -3,10 +3,12 @@
 coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new
-    discovery: https://discovery.etcd.io/dc60a31e79380895a7375b498c4e7c04
+    discovery: https://discovery.etcd.io/766bb194f362b16ee5190c905e10db37
     # multi-region and multi-cloud deployments need to use $public_ipv4
     addr: $private_ipv4:4001
     peer-addr: $private_ipv4:7001
+    peer-heartbeat-interval: 200 # default is 50
+    peer-election-timeout: 1000 # default is 200
   fleet:
     public-ip: $public_ipv4
     metadata: region=europe-west1,az=europe-west1-a
@@ -15,11 +17,12 @@ coreos:
       command: start
     - name: fleet.service
       command: start
+
     - name: docker-images.service
       command: start
       content: |
         [Unit]
-        Description=Pulls Docker images
+        Description=Pulling Docker images
         Requires=docker.service
         After=docker.service
         [Service]
@@ -33,6 +36,7 @@ coreos:
         ExecStart=/usr/bin/docker pull ubuntu:latest
         ExecStart=/usr/bin/docker pull ubuntu-upstart:latest
         ExecStart=/usr/bin/docker pull phusion/baseimage:latest
+
     # https://coreos.com/docs/cluster-management/setup/mounting-storage/
     # http://www.freedesktop.org/software/systemd/man/systemd.swap.html
     - name: mkswap-sdb.service
