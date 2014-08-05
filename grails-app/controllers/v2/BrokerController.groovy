@@ -1,6 +1,10 @@
 package v2
 
+import com.google.api.services.compute.Compute
 import groovy.sql.Sql
+import groovyx.gpars.actor.Actor
+import static groovyx.gpars.actor.Actors.actor
+import wslite.rest.ContentType
 import wslite.rest.RESTClient
 
 class BrokerController {
@@ -22,28 +26,145 @@ class BrokerController {
     String secret
     boolean coreos
     String ip
-    RESTClient etcd
-  //RESTClient fleet
+    private final String etcdPrefix = '/cf-docker-broker'
+    Thread _etcdWatch
+    Actor _serviceWatch
+    @Lazy private static volatile RESTClient metadata = new RESTClient('http://metadata//computeMetadata/v1')
+    final int tm = 10000 // ms
 
     @javax.annotation.PostConstruct
-    void configure() {
+    void init() {
         def c = grailsApplication.config?.broker?.v2
-        this.ip = (c?.publicip ? publicIp() : null) ?: Inet4Address.localHost.hostAddress // IPv4 is blossoming!
-        this.secret = c?.secret ?: 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
-        this.coreos = c?.backend == 'coreos' ? true : c?.backend == 'docker' ? false : { throw new RuntimeException('`broker.v2.backend` must be one of: docker, coreos') }()
+        if (!c) throw new RuntimeException('`broker.v2.backend` must be set in Grails app config')
+        this.secret = c.secret ?: 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
+        this.coreos = c.backend == 'coreos' ? true : c.backend == 'docker' ? false : { throw new RuntimeException('`broker.v2.backend` must be one of: docker, coreos') }()
         if (this.coreos) {
-            if (!c?.coreoshost) throw new RuntimeException('`broker.v2.coreoshost` must be set if broker.v2.backend = coreos')
-            this.etcd = new RESTClient("http://${c.coreoshost}:4001/v2/keys")
-          //this.fleet = new new RESTClient("http://${c.coreoshost}:7001/")
+            if (!c.coreoshost) throw new RuntimeException('`broker.v2.coreoshost` must be set if broker.v2.backend = coreos')
+            // so far Fleet has no REST API available, we'll use etcd API and fleetctl
+            def etcd = new RESTClient("http://${c.coreoshost}:4001/v2/keys")
+            def gce = initGCE()
+            this._serviceWatch = watchServices(gce)
+            this._etcdWatch = Thread.startDaemon { watchEtcd(etcd, this._serviceWatch) }
         }
+        this.ip = (c.publicip ? publicIp() : null) ?: Inet4Address.localHost.hostAddress // IPv4 is blossoming!
+    }
+
+    @javax.annotation.PreDestroy
+    void shutdown() {
+        if (this._etcdWatch) this._etcdWatch.with { interrupt(); join() }
+        if (this._serviceWatch) this._serviceWatch.with { terminate(); join() }
     }
 
     private String publicIp() {
         try {
-            int tm = 10000 // ms
-            String maybe = new URL('http://v4.ipv6-test.com/api/myip.php').getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
+            String maybe =  this.coreos ? // CoreOS -> we're running on GCE
+                 // URL.getText() cannot set HTTP header
+                 // Metadata returns application/text which wslite doesn't like for providing response.text
+                new String(metadata.get(path: '/instance/network-interfaces/0/access-configs/0/external-ip',
+                                            headers: [ 'X-Google-Metadata-Request': true ], connectTimeout: tm, readTimeout: tm).data, 'UTF-8') :
+                new URL('http://v4.ipv6-test.com/api/myip.php').getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
             maybe ==~ /\d+\.\d+\.\d+\.\d+/ ? maybe : null
         } catch (e) { null }
+    }
+
+    private void watchEtcd(RESTClient etcd, Actor services) {
+        while (!Thread.interrupted()) {
+            try {
+                def r = etcd.get(path: etcdPrefix, query: [ wait: true, recursive: true /*, waitIndex: */ ], accept: ContentType.JSON, connectTimeout: tm, readTimeout: tm)
+                if (r.statusCode != 200) continue
+                def j = r.json
+                // {"action":"set","node":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":913,"createdIndex":913},"prevNode":{"key":"/services/redis","value":"1.2.3.4:5555","modifiedIndex":909,"createdIndex":909}}
+                // {"action":"update","node":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":920,"createdIndex":913},"prevNode":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":913,"createdIndex":913}}
+                // {"action":"delete","node":{"key":"/services/redis","modifiedIndex":3087,"createdIndex":913},"prevNode":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":920,"createdIndex":913}}
+                if (!j.node.key.startsWith(etcdPrefix + '/')) continue
+                String service = j.node.key.substring(etcdPrefix.length + 1)
+                switch (j.action) {
+                    case 'set': case 'update':
+                        services << [ op: 'add', service: service, address: j.node.value ]
+                        break
+                    case 'delete':
+                        services << [ op: 'del', service: service ]
+                        break
+                }
+            } catch(InterruptedException i) {
+                return
+            } catch (e) {
+                e.printStackTrace()
+                try { Thread.sleep(tm) } catch(InterruptedException i) { return }
+            }
+        }
+    }
+
+    private Actor watchServices(Compute gce) {
+        def services = [:]
+        actor {
+            loop {
+                react { msg ->
+                    try {
+                        switch (msg.op) {
+                            case 'add':
+                                break
+
+                            case 'del':
+                                break
+
+                            case 'get':
+                                break
+                        }
+                    } catch (e) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+    }
+
+    private Compute initGCE() {
+        /* https://developers.google.com/compute/docs/authentication
+           We use GCE service account by querying metadata server for an access token.
+           Full Oauth2 flow is like the following - on first use, a prompt will be
+           issued on the console to perform a manual interaction with Google in browser.
+
+            import com.google.api.client.extensions.java6.auth.oauth2.AuthorizationCodeInstalledApp
+            import com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver
+            import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow
+            import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets
+            import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport
+            import com.google.api.client.json.jackson2.JacksonFactory
+            import com.google.api.client.util.store.FileDataStoreFactory
+            import com.google.api.services.compute.Compute
+            import com.google.api.services.compute.ComputeScopes
+            @Lazy static volatile Compute compute = {
+                // http://samples.google-api-java-client.googlecode.com/hg/compute-engine-cmdline-sample/instructions.html
+                // hg clone https://code.google.com/p/google-api-java-client.samples/
+                // alternatively we may use https://code.google.com/p/google-api-java-client/wiki/ClientLogin (deprecated)
+                //   more info:
+                // https://code.google.com/p/google-api-java-client/wiki/DeveloperGuide
+                // https://developers.google.com/resources/api-libraries/documentation/compute/v1/java/latest/
+                // http://javadoc.google-api-java-client.googlecode.com/hg/1.19.0/index.html
+                def http = GoogleNetHttpTransport.newTrustedTransport()
+                def dataStore = new FileDataStoreFactory(new java.io.File(System.getProperty("user.home"), (windows() ? "AppData/Local" : ".cache") + "/multicloud_google_compute_engine"))
+                def json = JacksonFactory.getDefaultInstance()
+                def secret = GoogleClientSecrets.load(json, new InputStreamReader(getClass().getResourceAsStream("/client_secret.json")))
+                def flow = new GoogleAuthorizationCodeFlow.Builder(http, json, secret, [ ComputeScopes.COMPUTE ]).setDataStoreFactory(dataStore).build()
+                def credential = new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user")
+                new Compute.Builder(http, json, null).setApplicationName("Accenture-MultiCloud/1.0").setHttpRequestInitializer(credential).build()
+            } ()
+        */
+        def initializer = new com.google.api.services.compute.ComputeRequestInitializer() {
+            @Override
+            void initializeComputeRequest(com.google.api.services.compute.ComputeRequest<?> request) {
+                super.initializeComputeRequest(request)
+                request.setKey(
+                    metadata.get(path: '/instance/service-accounts/default/token', headers: [ 'X-Google-Metadata-Request': true ], accept: ContentType.JSON).json.access_token)
+            }
+        }
+        new com.google.api.services.compute.Compute.Builder(
+                com.google.api.client.googleapis.javanet.GoogleNetHttpTransport.newTrustedTransport(),
+                com.google.api.client.json.jackson2.JacksonFactory.getDefaultInstance(), null)
+            .setApplicationName("${grailsApplication.metadata.'app.name'}/${grailsApplication.metadata.'app.version'}")
+            .setGoogleClientRequestInitializer(initializer)
+            .build()
     }
 
     def catalog() {
@@ -161,9 +282,9 @@ class BrokerController {
         if (plan.s != 'rabbitmq') say(201) else
             publicPort(container, rmqMgmt) { int port ->
                 say(201) {
-                    // doesn't work
-                    // proper way could be http://docs.cloudfoundry.org/services/dashboard-sso.html
-                    [ dashboard_url: "http://admin:$pass@$ip:$port/" ]
+                    // a proper way could be http://docs.cloudfoundry.org/services/dashboard-sso.html
+                    // stolen from https://github.com/nimbus-cloud/cf-rabbitmq-broker/blob/master/rabbitmq/service.go#L121
+                    [ dashboard_url: "http://$ip:$port/#/login/admin/$pass" ]
                 }
             }
     }
@@ -222,9 +343,9 @@ class BrokerController {
                         def rmq = new RESTClient("http://$ip:$managementPort/api/")
                         rmq.authorization = new wslite.http.auth.HTTPBasicAuthorization('admin', adminPass)
                         rmq.put(path: "users/$user") { json password: pass, tags: '' }
-                        rmq.put(path: "vhosts/$vhost") { type wslite.rest.ContentType.JSON }
+                        rmq.put(path: "vhosts/$vhost") { type ContentType.JSON }
                         rmq.put(path: "permissions/$vhost/$user") { json configure: '.*', write: '.*', read: '.*' }
-                        creds = [ uri: "rabbitmq://$user:$pass@$ip:$port/$vhost", host: ip, port: port, username: user, password: pass ]
+                        creds = [ uri: "amqp://$user:$pass@$ip:$port/$vhost", host: ip, port: port, username: user, password: pass ]
                     }
                     break
 

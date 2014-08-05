@@ -2,8 +2,8 @@
 
 . ./coreos-common.sh
 
-# --boot_disk_size_gb=10
-# --external_ip_address=none \ -- cannot docker pull w/o public IP
+# --boot_disk_size_gb=10 -- CoreOS is 9GB
+# --external_ip_address=none \ -- cannot do `docker pull` w/o public IP
 gcutil addinstance \
   --image=projects/coreos-cloud/global/images/$image \
   --boot_disk_type=pd-ssd --auto_delete_boot_disk --zone=$zone --machine_type=f1-micro \

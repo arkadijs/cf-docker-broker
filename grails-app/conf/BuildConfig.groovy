@@ -53,6 +53,10 @@ grails.project.dependency.resolution = {
         runtime 'org.postgresql:postgresql:9.3-1102-jdbc41'
         compile 'org.mongodb:mongo-java-driver:2.12.3'
         compile 'com.github.groovy-wslite:groovy-wslite:1.1.0'
+        compile 'org.codehaus.gpars:gpars:1.2.1'
+        compile 'com.google.apis:google-api-services-compute:v1-rev29-1.19.0'
+        compile 'com.google.http-client:google-http-client-jackson2:1.19.0'
+        compile 'com.google.oauth-client:google-oauth-client-jetty:1.19.0'
         test "org.grails:grails-datastore-test-support:1.0-grails-2.4"
     }
 
