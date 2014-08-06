@@ -3,7 +3,8 @@
 coreos:
   etcd:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new
-    discovery: https://discovery.etcd.io/766bb194f362b16ee5190c905e10db37
+    #discovery: https://discovery.etcd.io/token
+    discovery: {{cluster_token}}
     # multi-region and multi-cloud deployments need to use $public_ipv4
     addr: $private_ipv4:4001
     peer-addr: $private_ipv4:7001

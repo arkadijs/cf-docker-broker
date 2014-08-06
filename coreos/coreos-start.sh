@@ -2,6 +2,9 @@
 
 . ./coreos-common.sh
 
+cloud_config=$(mktemp)
+cluster_token=$(curl https://discovery.etcd.io/new)
+sed -e "s|{{cluster_token}}|$cluster_token|g" < cloud-config.yml > $cloud_config
 # --boot_disk_size_gb=10 -- CoreOS is 9GB
 # --external_ip_address=none \ -- cannot do `docker pull` w/o public IP
 gcutil addinstance \
@@ -9,7 +12,7 @@ gcutil addinstance \
   --boot_disk_type=pd-ssd --auto_delete_boot_disk --zone=$zone --machine_type=f1-micro \
   --service_account_scopes=compute-ro,storage-full,userinfo-email \
   --tags=coreos \
-  --metadata_from_file=user-data:cloud-config.yml \
+  --metadata_from_file=user-data:$cloud_config \
   $(coreos_nodes)
 
 gcutil adddisk --disk_type=pd-standard --size_gb=10 --zone=$zone $(coreos_swap_disks)
@@ -21,4 +24,4 @@ done
 
 wait
 
-echo "\nYour CoreOS cluster is ready!\nDo 'export FLEETCTL_ENDPOINT=http://core${index:+$index-}1:4001' now.\nBuild 'fleetctl' from https://github.com/coreos/fleet\nBuild 'etcdctl' from https://github.com/coreos/etcdctl"
+echo "\nYour CoreOS cluster is ready!\nDo 'export FLEETCTL_ENDPOINT=http://core${index}1:4001' now.\nBuild 'fleetctl' from https://github.com/coreos/fleet\nBuild 'etcdctl' from https://github.com/coreos/etcdctl"
