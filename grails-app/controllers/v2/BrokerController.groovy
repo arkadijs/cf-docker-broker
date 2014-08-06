@@ -1,9 +1,11 @@
 package v2
 
 import com.google.api.services.compute.Compute
+import com.google.api.services.compute.model.*
 import groovy.sql.Sql
 import groovyx.gpars.actor.Actor
 import static groovyx.gpars.actor.Actors.actor
+import java.util.concurrent.TimeUnit
 import wslite.rest.ContentType
 import wslite.rest.RESTClient
 
@@ -27,6 +29,9 @@ class BrokerController {
     String secret
     boolean coreos
     String ip
+    String region
+    String project
+    String baseUri
     private final String etcdPrefix = '/cf-docker-broker'
     Thread _etcdWatch
     Actor _serviceWatch
@@ -38,16 +43,22 @@ class BrokerController {
         def c = grailsApplication.config?.broker?.v2
         if (!c) throw new RuntimeException('`broker.v2.backend` must be set in Grails app config')
         this.secret = c.secret ?: 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
-        this.coreos = c.backend == 'coreos' ? true : c.backend == 'docker' ? false : { throw new RuntimeException('`broker.v2.backend` must be one of: docker, coreos') }()
+        this.coreos = c.backend == 'coreos' ? true : c.backend == 'docker' ? false : { throw new IllegalArgumentException('`broker.v2.backend` must be one of: docker, coreos') }()
         if (this.coreos) {
             if (!c.coreoshost) throw new RuntimeException('`broker.v2.coreoshost` must be set if broker.v2.backend = coreos')
+            if (!looksIp(c.publicip))  throw new IllegalArgumentException('`broker.v2.public` must be set to a reserved IP address if broker.v2.backend = coreos')
+            this.ip = c.publicip
+            this.region = c.region ?: metadataRegion()
+            this.project = c.project ?: metadataProject()
+            this.baseUri = 'https://www.googleapis.com/compute/v1/projects/' + project
             // so far Fleet has no REST API available, we'll use etcd API and fleetctl
             def etcd = new RESTClient("http://${c.coreoshost}:4001/v2/keys")
             def gce = initGCE()
             this._serviceWatch = watchServices(gce)
             this._etcdWatch = Thread.startDaemon { watchEtcd(etcd, this._serviceWatch) }
+        } else { // docker
+            this.ip = (c.publicip ? publicIp() : null) ?: Inet4Address.localHost.hostAddress // IPv4 is blossoming!
         }
-        this.ip = (c.publicip ? publicIp() : null) ?: Inet4Address.localHost.hostAddress // IPv4 is blossoming!
         this.logo += grailsResourceLocator.findResourceForURI('/images/docker-whale-150x150.png').file.bytes.encodeBase64().toString()
     }
 
@@ -57,21 +68,37 @@ class BrokerController {
         if (this._serviceWatch) this._serviceWatch.with { terminate(); join() }
     }
 
+    private boolean looksIp(String maybe) { maybe ==~ /\d+\.\d+\.\d+\.\d+/ /* anchored match */ }
+
+    private String metadataIp() {
+        // URL.getText() cannot set HTTP header
+        // Metadata returns application/text which wslite doesn't like for providing response.text
+        new String(metadata.get(path: '/instance/network-interfaces/0/access-configs/0/external-ip',
+                                headers: [ 'X-Google-Metadata-Request': true ], connectTimeout: tm, readTimeout: tm).data, 'UTF-8')
+    }
+
+    private String metadataRegion() {
+        // projects/77511713522/zones/europe-west1-b
+        String zone = new String(metadata.get(path: '/instance/zone', headers: [ 'X-Google-Metadata-Request': true ], connectTimeout: tm, readTimeout: tm).data, 'UTF-8')
+        zone.substring(zone.lastIndexOf('/') + 1, zone.lastIndexOf('-'))
+    }
+
+    private String metadataProject() {
+        new String(metadata.get(path: '/project/project-id', headers: [ 'X-Google-Metadata-Request': true ], connectTimeout: tm, readTimeout: tm).data, 'UTF-8')
+    }
+
     private String publicIp() {
         try {
-            String maybe =  this.coreos ? // CoreOS -> we're running on GCE
-                 // URL.getText() cannot set HTTP header
-                 // Metadata returns application/text which wslite doesn't like for providing response.text
-                new String(metadata.get(path: '/instance/network-interfaces/0/access-configs/0/external-ip',
-                                            headers: [ 'X-Google-Metadata-Request': true ], connectTimeout: tm, readTimeout: tm).data, 'UTF-8') :
-                new URL('http://v4.ipv6-test.com/api/myip.php').getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
-            maybe ==~ /\d+\.\d+\.\d+\.\d+/ ? maybe : null
+            String maybe = new URL('http://v4.ipv6-test.com/api/myip.php').getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
+            looksIp(maybe) ? maybe : null
         } catch (e) { null }
     }
 
     private void watchEtcd(RESTClient etcd, Actor services) {
         while (!Thread.interrupted()) {
             try {
+                // TODO use waitIndex to see all events
+                // TODO scan for services at startup and fire 'add' events for every service found
                 def r = etcd.get(path: etcdPrefix, query: [ wait: true, recursive: true /*, waitIndex: */ ], accept: ContentType.JSON, connectTimeout: tm, readTimeout: tm)
                 if (r.statusCode != 200) continue
                 def j = r.json
@@ -79,13 +106,13 @@ class BrokerController {
                 // {"action":"update","node":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":920,"createdIndex":913},"prevNode":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":913,"createdIndex":913}}
                 // {"action":"delete","node":{"key":"/services/redis","modifiedIndex":3087,"createdIndex":913},"prevNode":{"key":"/services/redis","value":"1.2.3.4:6666","modifiedIndex":920,"createdIndex":913}}
                 if (!j.node.key.startsWith(etcdPrefix + '/')) continue
-                String service = j.node.key.substring(etcdPrefix.length + 1)
+                String service = j.node.key.substring(etcdPrefix.length() + 1)
                 switch (j.action) {
                     case 'set': case 'update':
-                        services << [ op: 'add', service: service, address: j.node.value ]
+                        services << [ op: 'add', service: service, address: j.node.value, etcdIndex: j.node.modifiedIndex as long ]
                         break
                     case 'delete':
-                        services << [ op: 'del', service: service ]
+                        services << [ op: 'del', service: service, etcdIndex: j.node.modifiedIndex as long ]
                         break
                 }
             } catch(InterruptedException i) {
@@ -97,20 +124,75 @@ class BrokerController {
         }
     }
 
+    private def maybe404(Closure call) {
+        try {
+            call()
+        } catch (com.google.api.client.http.HttpResponseException ex) {
+            if (ex.statusCode != 404) throw ex
+        }
+    }
+
+    /* TODO document: On Google Compute Engine ...
+    */
     private Actor watchServices(Compute gce) {
-        def services = [:]
+        def services = [:] // service -> [ address: public ip:port, etcdIndex: index ]
+        def pending = [:] // service -> [interested, parties]
         actor {
             loop {
                 react { msg ->
                     try {
                         switch (msg.op) {
                             case 'add':
+                                if (services[msg.service]?.etcdIndex >= msg.etcdIndex)
+                                    break
+                                // setup forwarding rule
+                                // msg.address is from etcd with private hostname:port
+                                def (zone, host, port) = msg.address.split(':')
+                                // TODO query GCE for forwarding rule named '$service' reserved_ip:port -> target_instance:port
+                                ForwardingRule fr = maybe404 { gce.forwardingRules().get(project, region, msg.service).execute() }
+                                String mappedPort = port as String// TODO GCE balancer/forwarder cannot change port number - implement port management when submitting units to fleet
+                                String target = "$baseUri/zones/$zone/targetInstances/$host-ti" // $host-ti is a pre-maid 'target instance'
+                                if (!fr) {
+                                    // fire and forget, hope its ok
+                                    gce.forwardingRules().insert(project, region,
+                                            new com.google.api.services.compute.model.ForwardingRule().setName(msg.service).setIPAddress(ip).setPortRange(mappedPort).setTarget(target))
+                                } else {
+                                    if (fr.target != target) // TODO check fr.portRange != mappedPort
+                                        gce.forwardingRules().setTarget(project, region, msg.service, new TargetReference().setTarget(target)).execute()
+                                }
+                                String publicAddress = "$ip:$mappedPort"
+
+                                services[msg.service] = [ address: publicAddress, etcdIndex: msg.etcdIndex ]
+
+                                if (pending[msg.service]) {
+                                    pending[msg.service].foreach { it << publicAddress }
+                                    pending.remove(msg.service)
+                                }
                                 break
 
                             case 'del':
+                                // wait a little bit for 'add' to arrive
+                                timer.schedule(
+                                    { this << [ op: 'try-del', service: msg.service, etcdIndex: msg.etcdIndex ] },
+                                    60, TimeUnit.SECONDS)
+                                break
+
+                            case 'try-del':
+                                if (services.containsKey(msg.service)) {
+                                    if (services[msg.service].etcdIndex <= msg.etcdIndex) {
+                                        // TODO delete forwarding rule
+                                    }
+                                }
                                 break
 
                             case 'get':
+                                if (services.containsKey(msg.service))
+                                    reply services[msg.service].address
+                                else {
+                                    if (pending[msg.service]) pending[msg.service] += sender
+                                    else pending[msg.service] = [sender]
+                                }
+
                                 break
                         }
                     } catch (e) {
