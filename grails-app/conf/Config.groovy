@@ -1,9 +1,18 @@
 grails.app.context = '/'
 
-broker.v2.publicip = true
+// secret is used to derive unique (admin) passwords for created services (to keep broker stateless)
+// must change this!
 broker.v2.secret = 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
-broker.v2.backend = 'coreos' // 'coreos' or 'docker'
-broker.v2.coreoshost = 'core1'
+// 'coreos' or 'docker'
+broker.v2.backend = 'coreos'
+// publicip - when backend is docker: use true or false
+// true -> autodetect globaly routable (public) IP with the help of ipv6-test.com
+// false -> ask for hostname and resolve it into IP, then use that
+//broker.v2.publicip = true
+// publicip - when backend is coreos: the GCE reserved static IP for protocol forwarding
+broker.v2.publicip = '23.251.138.226'
+// any hostname from the cluster for etcd connection
+broker.v2.coreoshost = 'core2-1'
 
 // locations to search for config files that get merged into the main config;
 // config files can be ConfigSlurper scripts, Java properties files, or classes

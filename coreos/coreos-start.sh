@@ -18,10 +18,23 @@ gcutil addinstance \
 gcutil adddisk --disk_type=pd-standard --size_gb=10 --zone=$zone $(coreos_swap_disks)
 
 for i in $(seq 1 $nr_nodes); do
-    gcutil attachdisk --disk=$(coreos_swap_disk $i) --zone=$zone $(coreos_node $i) &
-    sleep 0.5
+    node=$(coreos_node $i)
+    gcutil attachdisk --disk=$(coreos_swap_disk $i) --zone=$zone $node &
+    sleep 0.1
+    gcutil addtargetinstance --instance=$node --zone=$zone $node-ti &
+    sleep 0.1
 done
+
+gcutil reserveaddress --region=$region $reserved_ip_name
+reserved_ip=$(gcutil getaddress --region=$region $reserved_ip_name | grep \ ip | awk '{print $4}')
 
 wait
 
-echo "\nYour CoreOS cluster is ready!\nDo 'export FLEETCTL_ENDPOINT=http://core${index}1:4001' now.\nBuild 'fleetctl' from https://github.com/coreos/fleet\nBuild 'etcdctl' from https://github.com/coreos/etcdctl"
+echo "\nCoreOS cluster is ready!"
+echo "Do 'export FLEETCTL_ENDPOINT=http://core${index}1:4001' now."
+echo "Build 'fleetctl' from https://github.com/coreos/fleet"
+echo "Build 'etcdctl' from https://github.com/coreos/etcdctl"
+echo "Configure cf-docker-broker/grails-app/conf/Config.groovy:"
+echo "\t broker.v2.backend = 'coreos'"
+echo "\t broker.v2.publicip = '$reserved_ip'"
+echo "\t broker.v2.coreoshost = 'core${index}1'"
