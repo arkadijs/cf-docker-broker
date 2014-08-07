@@ -1,9 +1,11 @@
 grails.app.context = '/'
+grails.cache.enabled = false // Guava version conflict with Google API libs
 
 // secret is used to derive unique (admin) passwords for created services (to keep broker stateless)
 // must change this!
 broker.v2.secret = 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
-// 'coreos' or 'docker'
+// 'docker' or 'coreos'
+//broker.v2.backend = 'docker'
 broker.v2.backend = 'coreos'
 // publicip - when backend is docker: use true or false
 // true -> autodetect globaly routable (public) IP with the help of ipv6-test.com
@@ -136,4 +138,6 @@ log4j.main = {
            'org.springframework',
            'org.hibernate',
            'net.sf.ehcache.hibernate'
+
+    debug  'grails.app.controllers.v2'
 }
