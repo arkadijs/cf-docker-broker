@@ -39,6 +39,7 @@ After=$service.service
 
 [Service]
 ExecStart=/bin/sh -c 'zone=\$(curl -s http://metadata/computeMetadata/v1/instance/zone -H "X-Google-Metadata-Request: true" | cut -d/ -f4); \
+    sleep 10; \
     while :; do \
         mapped_port=\$(docker port $service $native_port | cut -d: -f2); \
         etcdctl set $etcd_prefix/$service \$zone/%H/api:\$mapped_port:$native_port --ttl 60; sleep 47; done'

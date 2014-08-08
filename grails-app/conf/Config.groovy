@@ -139,5 +139,5 @@ log4j.main = {
            'org.hibernate',
            'net.sf.ehcache.hibernate'
 
-    debug  'grails.app.controllers.v2'
+    debug  'grails.app.controllers.v2', 'v2'
 }
