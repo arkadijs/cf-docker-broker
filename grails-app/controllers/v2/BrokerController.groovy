@@ -52,6 +52,7 @@ class BrokerController {
     Thread discoverer // watches ETCD for published service endpoints
     Actor services    // (a) receives info from Discoverer to manipulate GCE protocol forwarding rules, (b) answers clients about service public endpoint
     Actor portmap     // manages free ports for protocol forwarding, stores state in ETCD
+    @Lazy volatile HTTPClient calmHttpClient = new HTTPClient().with { connectTimeout = readTimeout = tm*10; it }
     @Lazy volatile HTTPClient httpClient = new HTTPClient().with { connectTimeout = readTimeout = tm; it }
     @Lazy volatile RESTClient metadata = new RESTClient('http://metadata/computeMetadata/v1', httpClient)
 
@@ -667,7 +668,7 @@ class BrokerController {
 
                 case 'rabbitmq':
                     publicEndpoint(container, mgmt(plan.ports).port) { String managementIp, int managementPort ->
-                        def rmq = new RESTClient("http://$managementIp:$managementPort/api/", httpClient)
+                        def rmq = new RESTClient("http://$managementIp:$managementPort/api/", calmHttpClient)
                         rmq.authorization = new wslite.http.auth.HTTPBasicAuthorization('admin', adminPass)
                         rmq.put(path: "users/$user") { json password: pass, tags: '' }
                         rmq.put(path: "vhosts/$vhost") { type ContentType.JSON }
