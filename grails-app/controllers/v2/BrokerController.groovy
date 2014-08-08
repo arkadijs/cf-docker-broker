@@ -49,6 +49,7 @@ class BrokerController {
     final String etcdPorts    = etcdPrefix + '/ports'
     Compute gce
     String gceUri = 'https://www.googleapis.com/compute/v1/projects/'
+    String fleetctlFlags
     Thread discoverer // watches ETCD for published service endpoints
     Actor services    // (a) receives info from Discoverer to manipulate GCE protocol forwarding rules, (b) answers clients about service public endpoint
     Actor portmap     // manages free ports for protocol forwarding, stores state in ETCD
@@ -69,6 +70,7 @@ class BrokerController {
             this.region = c.region ?: metadataRegion()
             this.project = c.project ?: metadataProject()
             this.gceUri += project
+            this.fleetctlFlags = "--request-timeout=10 --endpoint=http://${c.coreoshost}:4001/"
             // so far Fleet has no REST API available, we'll use ETCD API and fleetctl
             this.etcd = new RESTClient("http://${c.coreoshost}:4001/v2/keys", httpClient)
             this.gce = initGCE()
@@ -454,7 +456,7 @@ class BrokerController {
         if (status > 0) {
             String stdout = fleetctl.inputStream.text
             String stderr = fleetctl.errorStream.text
-            if (cmd.startsWith('fleetctl destroy') && stderr.contains('could not find Job'))
+            if (cmd ==~ /fleetctl.* destroy .+/ && stderr.contains('could not find Job'))
                 return false // not an error
             String error = "`fleetctl` failed with status $status\n\$ $cmd\n$stderr\n$stdout"
             render(status: 500, text: error)
@@ -559,7 +561,7 @@ class BrokerController {
             def discoveryUnit = new File(tmpdir, container + '-discovery.service')
             serviceUnit.withWriter { unitTemplate.make(unitParams).writeTo(it) }
             discoveryUnit.withWriter { discoveryTemplate.make(unitParams).writeTo(it) }
-            fleet("fleetctl start ${serviceUnit.absolutePath} ${discoveryUnit.absolutePath}")
+            fleet("fleetctl $fleetctlFlags start ${serviceUnit.absolutePath} ${discoveryUnit.absolutePath}")
             serviceUnit.delete()
             discoveryUnit.delete()
         } else {
@@ -617,7 +619,7 @@ class BrokerController {
         if (check(request, params)) return
         def container = container(request, params)
         if (coreos) {
-            if (fleet("fleetctl destroy $container-discovery $container")) return
+            if (fleet("fleetctl $fleetctlFlags destroy $container-discovery $container")) return
         } else {
             if (docker("docker stop $container")) return
             if (docker("docker rm $container")) return
