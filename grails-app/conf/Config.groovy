@@ -12,7 +12,7 @@ broker.v2.backend = 'coreos'
 // false -> ask for hostname and resolve it into IP, then use that
 //broker.v2.publicip = true
 // publicip - when backend is coreos: the GCE reserved static IP for protocol forwarding
-broker.v2.publicip = '23.251.138.226'
+broker.v2.publicip = '130.211.93.198'
 // the region of CoreOS machines and reserved IP address
 // will be autodetected from broker's machine metadata if not set
 //broker.v2.region = 'europe-west1'
@@ -20,7 +20,7 @@ broker.v2.publicip = '23.251.138.226'
 // will be autodetected from broker's machine metadata if not set
 //broker.v2.project = 'want-vpc'
 // any hostname from the cluster for etcd connection
-broker.v2.coreoshost = 'core2-1'
+broker.v2.coreoshost = 'core3-1'
 
 // locations to search for config files that get merged into the main config;
 // config files can be ConfigSlurper scripts, Java properties files, or classes
