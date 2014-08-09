@@ -55,7 +55,7 @@ Register broker with CloudFoundry and make it's plans public:
         cf curl /v2/service_plans/$p -X 'PUT' -d '{"public":true}';
      done
 
-[Resolved](https://www.pivotaltracker.com/s/projects/892938/stories/57752202) at 08/08/14. -(Somebody, tell me, why we need the PUT stanza instead of nice `cf service-plan` command or something?)-
+[Resolved](https://www.pivotaltracker.com/s/projects/892938/stories/57752202) at 08/08/14. ~~(Somebody, tell me, why we need the PUT stanza instead of nice `cf service-plan` command or something?)~~
 
 #### Internals
 
@@ -90,7 +90,7 @@ When service is deleted, `delete()` is invoked that removes service units with `
 3. Even flagship Docker containers are of questionable quality.
 4. Hopefully there are [ubuntu-upstart] and [phusion/baseimage-docker] for proper runtime init. People, let start using those! Let restart failed services so that failure won't bubble-up to Docker. (I agree, it depends.)  
 5. Overloading a node in CoreOS cluster may not work very well for the whole cluster. Jobs will bounce in hordes overloading other nodes (in case they don't have the capacity), leaving cluster de-facto inoperable. ETCD and Fleet CLI tools will timeout, giving a hard chance to diagnose the problem. `systemctl` still works, luckily.
-6. Supposed to be resolved. -[BOSH errands] are crap. Booting a VM to run a single command, like `curl -X POST` to register a broker? Listen, there are more: the VM(-s) is/are here to stay forever even if you don't need it/them anymore. Probably just in case you'll want to run the command again. To dismiss the errand's VM you change the (deployment) manifest and re-deploy to adjust resource pool setup. Who invented that, J2EE architects?-
+6. Supposed to be resolved. ~~[BOSH errands] are crap. Booting a VM to run a single command, like `curl -X POST` to register a broker? Listen, there are more: the VM(-s) is/are here to stay forever even if you don't need it/them anymore. Probably just in case you'll want to run the command again. To dismiss the errand's VM you change the (deployment) manifest and re-deploy to adjust resource pool setup. Who invented that, J2EE architects?~~
 7. CloudFoundry doesn't work? Good luck finding why. Have a large deployment manifest with 25+ VM-s (?) - _ssh_ randomly across the machines and lure under `/var/vcap/sys/log`. Got `syslog_aggregator:` property prudently setup in CloudFoundry deployment manifest? You'll get everything at `user.notice` syslog facility/severity. Try to write more regexps for [logstash] - maybe it will help parse those pesky syslogs.
 8. BOSH emits _cannot convert string to integer_? Look **very** carefully at deployment manifest. No clue? Ok, _ssh_ to BOSH machine, look into logs over there (in `/var/vcap/sys/log`). Doesn't work yet? I'm still with you: leave only one _resque_ worker alive: `monit summary`, `monit status`, `monit stop worker_2`, `monit stop worker_3` are your friends. Start adding logging to BOSH Ruby gems somewhere under `/var/vcap` (at least everything is under that legacy-named directory). Then `monit restart worker_1`. Resubmit the deployment. Wash-repeat.
 9. `monit` is not spotless.
