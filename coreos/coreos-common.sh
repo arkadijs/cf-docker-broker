@@ -1,5 +1,6 @@
 region=europe-west1
 zone=europe-west1-a
+machine_type=g1-small
 index=3
 nr_nodes=3
 #image=coreos-alpha-394-0-0-v20140801

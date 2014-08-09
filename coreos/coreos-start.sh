@@ -9,7 +9,7 @@ sed -e "s|{{cluster_token}}|$cluster_token|g" < cloud-config.yml > $cloud_config
 # --external_ip_address=none \ -- cannot do `docker pull` w/o public IP
 gcutil addinstance \
   --image=projects/coreos-cloud/global/images/$image \
-  --boot_disk_type=pd-ssd --auto_delete_boot_disk --zone=$zone --machine_type=g1-small \
+  --boot_disk_type=pd-ssd --auto_delete_boot_disk --zone=$zone --machine_type=$machine_type \
   --service_account_scopes=compute-ro,storage-full,userinfo-email \
   --tags=coreos \
   --metadata_from_file=user-data:$cloud_config \
