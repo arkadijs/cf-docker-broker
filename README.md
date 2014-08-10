@@ -86,7 +86,7 @@ When service is deleted, `delete()` is invoked that removes service units with `
 #### Lessons learned
 
 1. Persistent storage (like database tables) with restartable containers is still an enigma with Docker and/or CoreOS. More or less solved by BOSH (with correctly written BOSH release).
-2. Docker default networking is limited. Only works for services that expose (a couple of) static ports. Say goodbye to Asterisk / SIP / RTP. Port management is a burden. Having a separate IP per container, like a VM, is possible, but an entirely your own [adventure](https://docs.docker.com/articles/networking/#building-your-own-bridge).
+2. Docker default networking is limited. Only works for services that expose (a couple of) static ports. Say goodbye to Asterisk / SIP / RTP. Port management is a burden. Having a separate IP per container, like a VM, is possible, but an entirely your own [adventure](https://docs.docker.com/articles/networking/#building-your-own-bridge). Kubernetes people [agree](https://github.com/GoogleCloudPlatform/kubernetes/blob/master/docs/networking.md).
 3. Even flagship Docker containers are of questionable quality.
 4. Hopefully there are [ubuntu-upstart] and [phusion/baseimage-docker] for proper runtime init. People, let start using those! Let restart failed services so that failure won't bubble-up to Docker. (I agree, it depends.)  
 5. Overloading a node in CoreOS cluster may not work very well for the whole cluster. Jobs will bounce in hordes overloading other nodes (in case they don't have the capacity), leaving cluster de-facto inoperable. ETCD and Fleet CLI tools will timeout, giving a hard chance to diagnose the problem. `systemctl` still works, luckily.
