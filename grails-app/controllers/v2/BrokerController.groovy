@@ -533,8 +533,8 @@ class BrokerController {
             case 'redis':      args = 'redis'; break
             case 'mysql':      args = "-e MYSQL_ROOT_PASSWORD=$pass mysql"; break
             case 'maria':      args = "-e MARIA_ROOT_PASSWORD=$pass arkadi/mariadb"; break
-            case 'postgresql': args = 'postgres'; break
-            case 'mongodb':    args = 'mongo'; break
+            case 'postgresql': args = 'postgres'; break // TODO introduce image that has password setup for postgres admin user
+            case 'mongodb':    args = 'mongo mongod --nojournal --smallfiles --noprealloc'; break // TODO admin password
             case 'rabbitmq':   args = "-e RABBITMQ_PASS=$pass tutum/rabbitmq"; break
             default:
                 render(status: 404, text: "No '${plan.service}' plan accepted here")
@@ -648,6 +648,7 @@ class BrokerController {
         publicEndpoint(container, api(plan.ports).port) { String ip, int port ->
             def creds = null
             switch (plan.service) {
+                // consider Redis as a single-tenant service
                 case 'redis': creds = [ uri: "redis://$ip:$port", host: ip, port: port ]; break
 
                 case 'mysql': case 'maria':
