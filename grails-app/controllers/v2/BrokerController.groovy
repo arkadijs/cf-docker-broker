@@ -534,7 +534,7 @@ class BrokerController {
             case 'mysql':      args = "-e MYSQL_ROOT_PASSWORD=$pass mysql"; break
             case 'maria':      args = "-e MARIA_ROOT_PASSWORD=$pass arkadi/mariadb"; break
             case 'postgresql': args = 'postgres'; break // TODO introduce image that has password setup for postgres admin user
-            case 'mongodb':    args = "-e MONGOD_OPTIONS='--nojournal --smallfiles --noprealloc --auth' -e MONGO_ROOT_PASSWORD=$pass arkadi/mongodb"; break
+            case 'mongodb':    args = "-e MONGOD_OPTIONS=\"--nojournal --smallfiles --noprealloc --auth\" -e MONGO_ROOT_PASSWORD=$pass arkadi/mongodb"; break
           //case 'mongodb':    args = 'mongo mongod --nojournal --smallfiles --noprealloc'; break -- _/mongo image has no admin password
             case 'rabbitmq':   args = "-e RABBITMQ_PASS=$pass tutum/rabbitmq"; break
             default:
