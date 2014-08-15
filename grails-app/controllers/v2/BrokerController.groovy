@@ -105,7 +105,7 @@ class BrokerController {
             }
         }
     }
-    private boolean looksIp(String maybe) { maybe ==~ /\d+\.\d+\.\d+\.\d+/ ? maybe : false } // anchored match
+    private def looksIp(String maybe) { maybe ==~ /\d+\.\d+\.\d+\.\d+/ ? maybe : false } // anchored match
     private String _metadata(String path) {
         // URL.getText() cannot set HTTP header
         // Metadata returns application/text which wslite doesn't like for providing response.text
@@ -122,7 +122,7 @@ class BrokerController {
         try {
             'http://v4.ipv6-test.com/api/myip.php'.toURL()
                 .getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
-                .with { looksIp(maybe) ?: null }
+                .with { looksIp(it) ?: null }
         } catch (e) { null }
     }
 
