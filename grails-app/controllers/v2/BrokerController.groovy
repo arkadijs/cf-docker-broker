@@ -657,7 +657,7 @@ class BrokerController {
                         mysql.execute("create database $db default character set utf8 default collate utf8_general_ci".toString())
                         mysql.execute("grant all privileges on $db.* to $user identified by '$pass'".toString())
                     }
-                    creds = [ uri: "mysql://$user:$pass@$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db ]
+                    creds = [ uri: "mysql://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db ]
                     break
 
                 case 'postgresql':
@@ -665,12 +665,13 @@ class BrokerController {
                         pg.execute("create user $user password '$pass'".toString())
                         pg.execute("create database $db owner $user template template0 encoding = 'UNICODE'".toString())
                     }
-                    creds = [ uri: "postgresql://$user:$pass@$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db ]
+                    creds = [ uri: "postgresql://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db ]
                     break
 
                 case 'mongodb':
                     // TODO create database and credentials
-                    creds = [ uri: "mongodb://root:$adminPass@$ip:$port", host: ip, port: port, username: 'root', password: adminPass ]
+                    // 'root' user is user manager - cannot manipulate data, must create dbOwner in db when bound to app
+                    creds = [ uri: "mongodb://$ip:$port", host: ip, port: port, username: 'root', password: adminPass ]
                     break
 
                 case 'rabbitmq':
