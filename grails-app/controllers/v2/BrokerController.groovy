@@ -328,7 +328,7 @@ class BrokerController {
         switch (msg.op) {
             case 'alloc':
                 int port = 0
-                def rnext = etcd.get(path: etcdPorts + '/next')
+                def rnext = etcd.get(path: etcdPorts + '/next', query: [ consistent: 'true' ]) // quorum=true doesn't work
                 def rrange = etcd.get(path: etcdPorts + '/range')
                 int next = rnext.json.node.value as int
                 String range = rrange.json.node.value
