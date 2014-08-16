@@ -14,7 +14,7 @@ Some work is still required, though:
 
 1. Providing metadata about the service for CloudFoundry [Service Catalog].
 2. Development of Docker image. This is [surely easier](https://registry.hub.docker.com/) than [BOSH release].
-3. A piece of custom code, in order of 5-10 lines, to provision (multi-tenant) service for a tenant/app, ie. create user, database, virtual host, etc. ([binding] in terms of API).
+3. A piece of custom code, in order of 10-20 lines, to provision (multi-tenant) service for a tenant/app, ie. create user, database, virtual host, etc. ([binding] in terms of API).
 
 #### Docker
 
@@ -83,6 +83,8 @@ When service is unbound, `unbind()` is invoked that must erase the credentials, 
 
 When service is deleted, `delete()` is invoked that removes service units with `fleetctl destroy`. Changes are propagated via ETCD (expiry by TTL), forwarding rules are deleted, ports are freed.
 
+There is also a short [slide-deck](http://goo.gl/tgTfXW).
+
 #### Lessons learned
 
 1. Persistent storage (like database tables) with restartable containers is still an enigma with Docker and/or CoreOS. More or less solved by BOSH (with correctly written BOSH release).
@@ -97,7 +99,6 @@ When service is deleted, `delete()` is invoked that removes service units with `
 10. Surely it was once necessary to repackage everything under `/var/vcap` to create BOSH release. `systemd` solved the `monit` problem at least. Let users use distribution packages - changing `--datadir` to `/var/vcap/somewhere` is easier than [that](http://docs.cloudfoundry.org/bosh/create-release.html)!
 11. [Stemcells] are built in dark undergrounds of [inferno]. We have a choice of Ubuntu and CentOS. No idea which build do work, or doesn't. Hope `go_agent` is faster than Ruby one, so it won't take BOSH several minutes to just pick-up a VM.
 12. Last, but not least - **CoreOS is beautiful**. Someday it may even work.
-
 
 [CloudFoundry]: http://docs.cloudfoundry.org/
 [BOSH]: http://docs.cloudfoundry.org/bosh
