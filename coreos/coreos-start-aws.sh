@@ -24,12 +24,12 @@ sed -e "s|{{cluster_token}}|$cluster_token|" < cloud-config.yml |
 # and that is not allowed by our security group
 #   sed -e 's/private_ipv4:/public_ipv4:/'
 
-# aws --region $region cloudformation create-stack \
-#   --stack-name $stack \
-#   --template-body file://cloudformation.template \
-#   --tags Key=Name,Value=$stack \
-#   --parameters \
-#       ParameterKey=InstanceType,ParameterValue=t2.small ParameterKey=KeyPair,ParameterValue=arkadi ParameterKey=AllowFleetCommandFrom,ParameterValue=$command_host ParameterKey=CloudConfig,ParameterValue="$(base64 $cloud_config)"
+aws --region $region cloudformation create-stack \
+  --stack-name $stack \
+  --template-body file://cloudformation.template \
+  --tags Key=Name,Value=$stack \
+  --parameters \
+      ParameterKey=InstanceType,ParameterValue=t2.small ParameterKey=KeyPair,ParameterValue=arkadi ParameterKey=AllowFleetCommandFrom,ParameterValue=$command_host ParameterKey=CloudConfig,ParameterValue="$(base64 $cloud_config)"
 rm $cloud_config
 set +e
 echo Waiting for CloudFormation...
