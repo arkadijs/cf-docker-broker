@@ -4,7 +4,7 @@
 
 cloud_config=$(mktemp)
 cluster_token=$(curl https://discovery.etcd.io/new)
-sed -e "s|{{cluster_token}}|$cluster_token|g" < cloud-config.yml > $cloud_config
+sed -e "s|{{cluster_token}}|$cluster_token|" < cloud-config.yml > $cloud_config
 # --boot_disk_size_gb=10 -- CoreOS is 9GB
 # --external_ip_address=none \ -- cannot do `docker pull` w/o public IP
 gcutil addinstance \
