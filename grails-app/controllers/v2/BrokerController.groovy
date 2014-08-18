@@ -646,6 +646,10 @@ class BrokerController {
         String user      = user(params.binding_id)
         String vhost     = vhost(params.binding_id)
 
+        // TODO retry Connection Refused errors from services a little bit
+        // that may happen in Docker mode when bind() is called early after
+        // service create(), even though CF retries on broker error, there will
+        // be just 3 econnrefused induced errors in a row
         publicEndpoint(container, api(plan.ports).port) { String ip, int port ->
             def creds = null
             switch (plan.service) {
