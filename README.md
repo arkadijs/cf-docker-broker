@@ -29,11 +29,11 @@ Configure `broker.v2.backend = 'docker'` in  `grails-app/conf/Config.groovy` and
 
 The prototype is tested on Google Compute Engine and Amazon Web Services.
 
-Create a new VM that will host the broker, `f1-micro` or `t2.micro` is good enough. There are two options to forward traffic to CoreOS instances: HAProxy and GCE network load-balancer - more on that below. To use GCE load balancer give the VM read-write access to the GCE project Compute resources. Via UI: press _Show advanced options_ on the right top of _New instance_ screen. Under _Project Access_ below, check _Enable Compute Engine service account_ and select _Read Write_ in _COMPUTE_ combo. Alternatively, supply `--service_account_scopes=compute` to `gcutil`.
+Create a new VM that will host the broker, `f1-micro` or `t2.micro` is good enough. There are two options to forward traffic to CoreOS instances: HAProxy and GCE network load-balancer - more on that below. To use GCE load-balancer give the VM read-write access to the GCE project Compute resources. Via UI: press _Show advanced options_ on the right top of _New instance_ screen. Under _Project Access_ below, check _Enable Compute Engine service account_ and select _Read Write_ in _COMPUTE_ combo. Alternatively, supply `--service_account_scopes=compute` to `gcutil`.
 
 `cd coreos/` and edit CoreOS cluster scripts. On GCE, edit `coreos-common.sh`, launch CoreOS cluster with `./coreos-start.sh`. On AWS, edit `cloudformation.template` and launch CoreOS cluster with `./coreos-start-aws.sh`.
 
-The CoreOS itself will be ready in a minute, so that you could use `etcdctl` and `fleetctl` immediately. But, on GCE only, wait some 10-20 minutes before you _ssh_ to the nodes, as we pre-seed required docker images via `systemd` service (see `coreos/cloud-config.yml`), but due to some init sequence peculiarities _ssh keys_ are not imported from project's metadata by Google user management daemon until this process is done.
+The CoreOS itself will be ready in a minute, so that you could use `etcdctl` and `fleetctl` immediately. But, on GCE (only), wait some 10-20 minutes before you _ssh_ to the nodes, as we pre-seed required docker images via `systemd` service (see `coreos/cloud-config.yml`), but due to some init sequence peculiarities _ssh keys_ are not imported from project's metadata by Google user management daemon until this process is done.
 
 Configure `broker.v2.backend = 'coreos'` in  `grails-app/conf/Config.groovy` together with the rest of required attributes, then run:
 
@@ -50,7 +50,7 @@ Install `haproxy` from packages: `apt-get install haproxy`, for example. If the 
 
 (`broker broker` being uid/gid of user which is suppose to start the Grails app)
 
-Alternatively, plug in `/etc/tc.local`:
+Alternatively, plug in `/etc/rc.local`:
 
     mkdir /run/haproxy && chown broker:broker /run/haproxy
 
@@ -58,7 +58,7 @@ Alternatively, plug in `/etc/tc.local`:
 
 On Google Compute Engine, there is an option to use load-balancer cloud service instead of HAProxy for an enhanced stability, for an additional small price.
 
-Reserve static IP for protocol forwarding and make necessary changes in config.
+Reserve static IP for protocol forwarding and make necessary changes in Grails app config.
 
 Please note, that there is an outstanding issue with GCE API daily quotas. Because broker actively polls for forwarding rule status, given sufficient number of forwarding rules it is easy to lock-out yourself from any access to the project until quota usage is reset. That happens daily.
 
