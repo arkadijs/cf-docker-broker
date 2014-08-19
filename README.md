@@ -27,18 +27,40 @@ Configure `broker.v2.backend = 'docker'` in  `grails-app/conf/Config.groovy` and
 
 #### CoreOS
 
-The prototype only works on Google Compute Engine.
+The prototype is tested on Google Compute Engine and Amazon Web Services.
 
-Create a new VM that will host the broker, `f1-micro` is good enough. Give it read-write access to the GCE project Compute resources. Via UI: press _Show advanced options_ on the right top of _New instance_ screen. Under _Project Access_ below, check _Enable Compute Engine service account_ and select _Read Write_ in _COMPUTE_ combo. Alternatively, supply `--service_account_scopes=compute` to `gcutil`.
+Create a new VM that will host the broker, `f1-micro` or `t2.micro` is good enough. There are two options to forward traffic to CoreOS instances: HAProxy and GCE network load-balancer - more on that below. To use GCE load balancer give the VM read-write access to the GCE project Compute resources. Via UI: press _Show advanced options_ on the right top of _New instance_ screen. Under _Project Access_ below, check _Enable Compute Engine service account_ and select _Read Write_ in _COMPUTE_ combo. Alternatively, supply `--service_account_scopes=compute` to `gcutil`.
 
-`cd coreos/` and edit CoreOS cluster scripts, starting with `coreos-common.sh`. Launch CoreOS cluster with `./coreos-start.sh`.
+`cd coreos/` and edit CoreOS cluster scripts. On GCE, edit `coreos-common.sh`, launch CoreOS cluster with `./coreos-start.sh`. On AWS, edit `cloudformation.template` and launch CoreOS cluster with `./coreos-start-aws.sh`.
 
-The CoreOS itself will be ready in a minute, so that you could use `etcdctl` and `fleetctl` immediately. But, wait some 10-20 minutes before you _ssh_ to the nodes, as we pre-seed required docker images via `systemd` service (see `coreos/cloud-config.yml`), but due to some init sequence peculiarities _ssh keys_ are not imported from project's metadata by Google user management daemon until this process is done.
+The CoreOS itself will be ready in a minute, so that you could use `etcdctl` and `fleetctl` immediately. But, on GCE only, wait some 10-20 minutes before you _ssh_ to the nodes, as we pre-seed required docker images via `systemd` service (see `coreos/cloud-config.yml`), but due to some init sequence peculiarities _ssh keys_ are not imported from project's metadata by Google user management daemon until this process is done.
 
 Configure `broker.v2.backend = 'coreos'` in  `grails-app/conf/Config.groovy` together with the rest of required attributes, then run:
 
     $ grails -reloading run-app    # or
     $ ./grailsw run-app
+
+##### HAProxy port forwarder
+
+HAProxy is managed by the broker which sends machine's interface (public) IP to CloudFoundry clients to keep service endpoint address stable.
+
+Install `haproxy` from packages: `apt-get install haproxy`, for example. If the hosts supports `tmpfiles.d`, create one:
+
+    echo 'd /run/haproxy 0755 broker broker' > /etc/tmpfiles.d/haproxy.conf
+
+(`broker broker` being uid/gid of user which is suppose to start the Grails app)
+
+Alternatively, plug in `/etc/tc.local`:
+
+    mkdir /run/haproxy && chown broker:broker /run/haproxy
+
+##### GCE network load-balancer and protocol forwarder
+
+On Google Compute Engine, there is an option to use load-balancer cloud service instead of HAProxy for an enhanced stability, for an additional small price.
+
+Reserve static IP for protocol forwarding and make necessary changes in config.
+
+Please note, that there is an outstanding issue with GCE API daily quotas. Because broker actively polls for forwarding rule status, given sufficient number of forwarding rules it is easy to lock-out yourself from any access to the project until quota usage is reset. That happens daily.
 
 #### CloudFoundry
 
@@ -59,7 +81,7 @@ Register broker with CloudFoundry and make it's plans public:
 
 #### Internals
 
-Alpha quality software ahead. Works on Google Compute Engine only.
+Alpha quality software ahead.
 
 The broker is almost stateless and, with some help, will hopefully recover from many errors. Fairly minimal amount of state is kept in ETCD: free port management, try `etcdctl ls /cf-docker-broker/ports`. Services (containers) are published under `/cf-docker-broker/services`. Broker does not write this sub-tree, only listen for changes.
 
@@ -73,6 +95,7 @@ On service creation, `create()` is invoked:
 4. Services Actor maintain some book-keeping to notify outstanding requesters about newly created endpoints. It will create Protocol Forwarding Rule pointing to the (GCE target) instance that host the service in that moment. Thus IP:port is kept stable for CloudFoundry clients. Do service migrate or service publication expire, changes will appear in ETCD and Rule will be updated or deleted. Port will be freed in later case by sending a message to Portmap Actor, that will write it in `/cf-docker-broker/ports/free`.
 5. Do service randomly re-appear, the port will be erased from `free` list.
 6. If service has `management` kind of access port defined with `dashboard` template, then a dashboard link is generated.
+7. If forwarding is managed by HAProxy, then new config will be periodically generated and `haproxy` process will be properly restarted.
 
 Next, when service is bound, `bind()` is invoked:
 

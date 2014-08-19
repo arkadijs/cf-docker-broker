@@ -1,26 +1,42 @@
-grails.app.context = '/'
-grails.cache.enabled = false // Guava version conflict with Google API libs
-
-// secret is used to derive unique (admin) passwords for created services (to keep broker stateless)
+// the secret is used to derive unique passwords for created services (to keep broker stateless)
 // must change this!
-broker.v2.secret = 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
+broker.v2.secret = '0529d585-47cf-4c1e-8118-393e3f95337c'
+
 // 'docker' or 'coreos'
-//broker.v2.backend = 'docker'
-broker.v2.backend = 'coreos'
-// publicip - when backend is docker: use true or false
+//broker.v2.backend = 'docker' // 'docker' must be in PATH
+broker.v2.backend = 'coreos' // 'fleetctl' must be in PATH
+// any hostname from the cluster for ETCD connection
+broker.v2.coreoshost = '172.31.26.189'
+
+// which cloud? unset if not running in the cloud
+//broker.v2.cloud = 'gce'
+broker.v2.cloud = 'aws'
+
+// service's port forwarding, must set when 'backend' is 'coreos'
+//broker.v2.forwarder = 'gce'
+broker.v2.forwarder = 'haproxy'
+broker.v2.haproxy.bin = '/usr/sbin/haproxy'
+broker.v2.haproxy.conf = '/run/haproxy/haproxy.conf'
+broker.v2.haproxy.pid = '/run/haproxy/haproxy.pid'
+broker.v2.haproxy.stoponexit = false
+
+// publicip - when 'backend' is 'docker' or 'forwarder' is 'haproxy': use true or false
 // true -> autodetect globaly routable (public) IP with the help of ipv6-test.com
 // false -> ask for hostname and resolve it into IP, then use that
-//broker.v2.publicip = true
-// publicip - when backend is coreos: the GCE reserved static IP for protocol forwarding
-broker.v2.publicip = '130.211.93.198'
-// the region of CoreOS machines and reserved IP address
+broker.v2.publicip = true
+// publicip - when 'backend' is 'coreos' and 'forwarder' is 'gce': the GCE reserved static IP for protocol forwarding
+//broker.v2.publicip = '130.211.93.198'
+
+// for 'gce' 'forwarder'
+// the region where CoreOS machines and reserved IP address are located in
 // will be autodetected from broker's machine metadata if not set
 //broker.v2.region = 'europe-west1'
 // the GCE project-id of CoreOS machines
 // will be autodetected from broker's machine metadata if not set
 //broker.v2.project = 'want-vpc'
-// any hostname from the cluster for etcd connection
-broker.v2.coreoshost = 'core3-1'
+
+grails.app.context = '/'
+grails.cache.enabled = false // Guava version conflict with Google API libs
 
 // locations to search for config files that get merged into the main config;
 // config files can be ConfigSlurper scripts, Java properties files, or classes

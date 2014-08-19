@@ -17,13 +17,13 @@ class BrokerController {
     def grailsResourceLocator
     def log = org.apache.log4j.Logger.getLogger(getClass())
 
-    final String serviceId = '8409b0f6-cb01-46bf-bdb2-ef98a7ba7ee3'
-    final String redisId = 'f73e4081-01ba-4cfa-9f20-817ff7fd2b47'
-    final String mysqlId = 'ad8f3dc2-ec3c-4df1-a7bb-0e4bf3be9576'
-    final String mariaId = 'be850e2f-83f4-4157-8f08-7cdba5c12fc4'
-    final String pgId    = '6fb18536-2d47-4e51-b4a5-f6cf41da4eaf'
-    final String mongoId = '8a145433-d206-457f-9ffa-1f2d850d6d58'
-    final String rmqId   = 'c34c7a5d-7b6c-4095-b06e-831fbf40e3c1'
+    final String serviceId = '017057ad-f188-41df-a75a-6a9ee46a976d'
+    final String redisId = 'c209af0d-33dc-424b-8ec6-54a1d363734d'
+    final String mysqlId = '7b387df6-3c61-4a4c-ae43-6f05c21e8912'
+    final String mariaId = '45e953d3-1598-4b54-95c9-16427e5e7059'
+    final String pgId    = 'f80271a3-0c58-4c23-a550-8828fcce63ad'
+    final String mongoId = '1050698f-be8e-43ac-a3f2-a74eaec714de'
+    final String rmqId   = '302e9f58-106b-40c0-8bad-8a593bcc2243'
     final def plans = [
         (redisId): [ service: 'redis',      ports: [ [ port: 6379,  kind: 'api' ] ] ],
         (mysqlId): [ service: 'mysql',      ports: [ [ port: 3306,  kind: 'api' ] ] ],
@@ -39,56 +39,80 @@ class BrokerController {
     // configuration
     String secret
     String ip
-    boolean coreos
-    // CoreOS and GCE specific vals
-    String project
-    String region // we work at region level with a single IP dedicated to protocol forwarding
-    RESTClient etcd // ETCD is used to discover services location and track free ports for protocol forwarding
+    // CoreOS specific vals
+    boolean coreos   // coreos or docker
+    boolean haproxy  // haproxy or GCE protocol forwarding
+    String cloud     // gce or aws, for metadata retrieval
+    boolean cloudGCE // simple boolean while only 2 clouds are supported
+    RESTClient etcd  // ETCD is used to discover services location and track free ports for protocol forwarding
     final String etcdPrefix   = '/cf-docker-broker'
     final String etcdServices = etcdPrefix + '/services'
     final String etcdPorts    = etcdPrefix + '/ports'
+    // GCE forwarder specific vals
+    String project
+    String region // we work at region level with a single IP dedicated to protocol forwarding
     Compute gce
-    String gceUri = 'https://www.googleapis.com/compute/v1/projects/'
+    String gceUri = 'https://www.googleapis.com/compute/v1/projects/' // standard URI prefix for GCE resources
+
     String fleetctlFlags
     Thread discoverer // watches ETCD for published service endpoints
     Actor services    // (a) receives info from Discoverer to manipulate GCE protocol forwarding rules, (b) answers clients about service public endpoint
+    Actor haproxyd    // manages haproxy config an process
     Actor portmap     // manages free ports for protocol forwarding, stores state in ETCD
+
     @Lazy volatile HTTPClient calmHttpClient = new HTTPClient().with { connectTimeout = readTimeout = tm*10; it }
     @Lazy volatile HTTPClient httpClient = new HTTPClient().with { connectTimeout = readTimeout = tm; it }
-    @Lazy volatile RESTClient metadata = new RESTClient('http://metadata/computeMetadata/v1', httpClient)
+    @Lazy volatile RESTClient metadata = new RESTClient(
+            cloudGCE ? 'http://metadata/computeMetadata/v1' : 'http://169.254.169.254/latest/meta-data', httpClient)
+
+    def templateEngine = new SimpleTemplateEngine()
 
     @javax.annotation.PostConstruct
     void init() {
         def c = grailsApplication.config?.broker?.v2
-        if (!c) throw new RuntimeException('`broker.v2.backend` must be set in Grails app config')
-        this.secret = c.secret ?: 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
-        this.coreos = c.backend == 'coreos' ? true : c.backend == 'docker' ? false : { throw new IllegalArgumentException('`broker.v2.backend` must be one of: docker, coreos') }()
-        if (this.coreos) {
+        if (!c) throw new RuntimeException('`broker.v2.backend` must be set in Grails app config `grails-app/conf/Config.groovy`')
+        secret = c.secret ?: 'f779df95-2190-4a0d-ad5b-9f2ba4550ea9'
+        coreos = c.backend == 'coreos' ?: c.backend == 'docker' ? false : { throw new IllegalArgumentException('`broker.v2.backend` must be one of: docker, coreos') }()
+        if (!['gce', 'aws', null].contains(c.cloud)) throw new IllegalArgumentException('`broker.v2.cloud` must be one of: gce, aws; or unset')
+        cloud = c.cloud
+        cloudGCE = cloud == 'gce'
+        if (coreos) {
             if (!c.coreoshost) throw new RuntimeException('`broker.v2.coreoshost` must be set if broker.v2.backend = coreos')
-            if (!looksIp(c.publicip)) throw new IllegalArgumentException('`broker.v2.public` must be set to a reserved static IP address if broker.v2.backend = coreos')
-            this.ip = c.publicip
-            this.region = c.region ?: metadataRegion()
-            this.project = c.project ?: metadataProject()
-            this.gceUri += project
-            this.fleetctlFlags = "--request-timeout=10 --endpoint=http://${c.coreoshost}:4001/"
+            haproxy = c.forwarder == 'haproxy' ?: c.forwarder == 'gce' ? false : { throw new IllegalArgumentException('`broker.v2.forwarder` must be one of: haproxy, gce') }()
+            if (haproxy) {
+                ip = myIp(c.publicip)
+                def h = c.haproxy
+                if (!h || [h.bin, h.conf, h.pid, h.stoponexit].any { it == null })
+                    throw new IllegalArgumentException('`broker.v2.haproxy.*` must be setup when `forwarder` is `haproxy`')
+                haproxyd = manageHaproxy(h)
+            } else { // GCE protocol forwarding
+                if (!cloudGCE) throw new IllegalArgumentException('`broker.v2.cloud` must be `gce` when `forwarder` is `gce`')
+                if (!looksIp(c.publicip)) throw new IllegalArgumentException('`broker.v2.public` must be set to a reserved static IP address if broker.v2.forwarder = gce')
+                ip = c.publicip
+                region = c.region ?: metadataRegion()
+                project = c.project ?: metadataProject()
+                gceUri += project
+                gce = initGCE()
+            }
+            fleetctlFlags = "--request-timeout=10 --endpoint=http://${c.coreoshost}:4001/"
             // so far Fleet has no REST API available, we'll use ETCD API and fleetctl
-            this.etcd = new RESTClient("http://${c.coreoshost}:4001/v2/keys", httpClient)
-            this.gce = initGCE()
-            this.portmap = managePorts()
-            this.services = watchServices()
-            this.discoverer = Thread.startDaemon('ETCD Watcher') { watchEtcd() }
+            etcd = new RESTClient("http://${c.coreoshost}:4001/v2/keys", httpClient)
+            portmap = managePorts()
+            services = watchServices()
+            discoverer = Thread.startDaemon('ETCD Watcher') { watchEtcd() }
         } else { // docker
-            this.ip = (c.publicip ? publicIp() : null) ?: Inet4Address.localHost.hostAddress // IPv4 is blossoming!
+            ip = myIp(c.publicip)
         }
-        this.logo += grailsResourceLocator.findResourceForURI('/images/docker-whale-150x150.png').file.bytes.encodeBase64().toString()
+        logo += grailsResourceLocator.findResourceForURI('/images/docker-whale-150x150.png').file.bytes.encodeBase64().toString()
     }
 
     @javax.annotation.PreDestroy
     void shutdown() {
         if (coreos) {
-            if (this.discoverer) this.discoverer.with { interrupt(); join() }
-            if (this.services) this.services.with { terminate(); join() }
-            if (this.portmap) this.portmap.with { terminate(); join() }
+            if (discoverer) discoverer.with { interrupt(); join() }
+            if (services)     services.with { stop(); join() }
+            if (haproxyd)     haproxyd.with { stop(); join() }
+            if (portmap)       portmap.with { stop(); join() }
         }
     }
 
@@ -105,26 +129,38 @@ class BrokerController {
             }
         }
     }
-    private def looksIp(String maybe) { maybe ==~ /\d+\.\d+\.\d+\.\d+/ ? maybe : false } // anchored match
     private String _metadata(String path) {
         // URL.getText() cannot set HTTP header
-        // Metadata returns application/text which wslite doesn't like for providing response.text
-        str(metadata.get(path: path, headers: [ 'X-Google-Metadata-Request': 'true' ]).data)
+        // GCE metadata server returns application/text which wslite doesn't like for providing response.text
+        str(metadata.get(path: path, headers: cloudGCE ? [ 'X-Google-Metadata-Request': 'true' ] : []).data)
     }
-    private String metadataIp() { _metadata('/instance/network-interfaces/0/access-configs/0/external-ip') }
-    private String metadataProject() { _metadata('/project/project-id') }
-    private String metadataRegion() {
-        _metadata('/instance/zone').with { // projects/77511713522/zones/europe-west1-b
-            substring(lastIndexOf('/') + 1, lastIndexOf('-'))
+    private String metadataProject() { _metadata('/project/project-id') } // GCE only
+    private String metadataRegion() { // GCE only
+        basename(_metadata('/instance/zone')).with { // projects/77511713522/zones/europe-west1-b
+            substring(0, lastIndexOf('-'))
         }
     }
+    private def looksIp(String maybe) { maybe ==~ /\d+\.\d+\.\d+\.\d+/ ? maybe : false } // anchored match
+    private String myIp(boolean pub) { pub ? publicIp() : localIp() }
     private String publicIp() {
-        try {
-            'http://v4.ipv6-test.com/api/myip.php'.toURL()
-                .getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
-                .with { looksIp(it) ?: null }
-        } catch (e) { null }
+        metadataPublicIp() ?: {
+            try {
+                'http://v4.ipv6-test.com/api/myip.php'.toURL()
+                    .getText([ connectTimeout: tm, readTimeout: tm, allowUserInteraction: false ])
+                    .with { looksIp(it) ?: localIp() }
+            } catch (e) { localIp() }
+        }()
     }
+    private String metadataPublicIp() {
+        if (cloud) looksIp(_metadata(cloudGCE ? '/instance/network-interfaces/0/access-configs/0/external-ip' : '/public-ipv4')) ?: null
+        else null
+    }
+    private String localIp() { metadataLocalIp() ?: Inet4Address.localHost.hostAddress } // IPv4 is blossoming!
+    private String metadataLocalIp() {
+        if (cloud) looksIp(_metadata(cloudGCE ? '/instance/network-interfaces/0/ip' : '/local-ipv4')) ?: null
+        else null
+    }
+    private long now() { System.currentTimeMillis() }
 
     private void watchEtcd() {
         long index = -1
@@ -228,25 +264,29 @@ class BrokerController {
                 def (zone, host, ports) = msg.location.split('/')
                 host = basename(host)
                 ports = ports.split(',').collect { it.split(':').with { [ kind: it[0], mapped: it[1] as int, native_: it[2] as int ] } }
-                // query GCE for forwarding rule named '$service-$port_kind' that points to target_instance:port
                 ports.each { mapping ->
-                    String rule = "${msg.service}-${mapping.kind}"
-                    String target = "$gceUri/zones/$zone/targetInstances/$host-ti" // $host-ti is a pre-maid 'target instance'
-                    // TODO rate-limit polling due to API limits, as we ask GCE on every service announcement (that happens every minute for every service)
-                    ForwardingRule fr = maybe404 { gce.forwardingRules().get(project, region, rule).execute() }
-                    if (!fr) {
-                        log.info("About to insert forwarding rule '$rule' pointing to '$target:${mapping.mapped}'")
-                        // fire and forget, hope its ok
-                        gce.forwardingRules().insert(project, region,
-                                new ForwardingRule().setName(rule).setIPAddress(ip).setPortRange(mapping.mapped.toString()).setTarget(target)).execute()
+                    if (haproxy) {
+                        haproxyd << [ op: 'add', host: host, port: mapping.mapped ]
                     } else {
-                        if ("${mapping.mapped}-${mapping.mapped}" != fr.portRange) {
-                            // Hell froze over
-                            // TODO recreate forwarding rule
-                            log.error("Forwarding rule '$rule' port range '${fr.portRange}' doesn't match expected '$mapping'")
-                        } else if (fr.target != target) {
-                            log.info("About to change target of forwarding rule '$rule' to '$target:${mapping.mapped}'")
-                            gce.forwardingRules().setTarget(project, region, rule, new TargetReference().setTarget(target)).execute()
+                        // query GCE for forwarding rule named '$service-$port_kind' that points to target_instance:port
+                        String rule = "${msg.service}-${mapping.kind}"
+                        String target = "$gceUri/zones/$zone/targetInstances/$host-ti" // $host-ti is a pre-maid 'target instance'
+                        // TODO rate-limit polling due to API limits, as we ask GCE on every service announcement (that happens every minute for every service)
+                        ForwardingRule fr = maybe404 { gce.forwardingRules().get(project, region, rule).execute() }
+                        if (!fr) {
+                            log.info("About to insert forwarding rule '$rule' pointing to '$target:${mapping.mapped}'")
+                            // fire and forget, hope its ok
+                            gce.forwardingRules().insert(project, region,
+                                    new ForwardingRule().setName(rule).setIPAddress(ip).setPortRange(mapping.mapped.toString()).setTarget(target)).execute()
+                        } else {
+                            if ("${mapping.mapped}-${mapping.mapped}" != fr.portRange) {
+                                // Hell froze over
+                                // TODO recreate forwarding rule
+                                log.error("Forwarding rule '$rule' port range '${fr.portRange}' doesn't match expected '$mapping'")
+                            } else if (fr.target != target) {
+                                log.info("About to change target of forwarding rule '$rule' to '$target:${mapping.mapped}'")
+                                gce.forwardingRules().setTarget(project, region, rule, new TargetReference().setTarget(target)).execute()
+                            }
                         }
                     }
                     portmap << [ op: 'ensure', port: mapping.mapped ]
@@ -272,9 +312,13 @@ class BrokerController {
                     def service = services[msg.service]
                     if (service.etcdIndex <= msg.etcdIndex) {
                         service.ports.each { mapping ->
-                            String rule = "${msg.service}-${mapping.kind}"
-                            log.info("About to delete forwarding rule '$rule'")
-                            maybe404 { gce.forwardingRules().delete(project, region, rule).execute() }
+                            if (haproxy) {
+                                haproxyd << [ op: 'del', port: mapping.mapped ]
+                            } else {
+                                String rule = "${msg.service}-${mapping.kind}"
+                                log.info("About to delete forwarding rule '$rule'")
+                                maybe404 { gce.forwardingRules().delete(project, region, rule).execute() }
+                            }
                             portmap << [ op: 'free', port: mapping.mapped ]
                         }
                         services.remove(msg.service)
@@ -370,7 +414,7 @@ class BrokerController {
             case 'ensure':
                 // that port was already given out
                 // ensure it is not stuck in free-list due to ETCD publication TTL expiration
-                log.debug("Ensuring port ${msg.port} is not in free-list")
+                log.trace("Ensuring port ${msg.port} is not in free-list")
                 def rfree = etcd.get(path: etcdPorts + '/free')
                 def str = rfree.json.node.value
                 if (str) {
@@ -386,6 +430,124 @@ class BrokerController {
                 }
                 break
         }
+    }
+
+    // TODO detect we're on `systemd` managed host and use that for HAProxy process management,
+    // but systemd supported schemes does not match haproxy -st / sf lifecycle?
+    private Actor manageHaproxy(config) {
+        def ports = [:]
+        def process = [
+            reload: false,
+            // at startup, let wait one minute to gather all port publications
+            // otherwise we can overwrite perfectly working setup with limited
+            // set of forwarding rules
+            reloadAt: now() + (new File(config.pid).exists() ? 60000 : 0)
+        ]
+        actor {
+            if (config.stoponexit) delegate.metaClass.onStop = { stopHaproxy(config) }
+            loop {
+                react(1570) { msg ->
+                    if (msg == Actor.TIMEOUT) {
+                        // do nothing
+                    } else {
+                        try {
+                            manageHaproxyPorts(msg, ports, process)
+                        } catch (ex) {
+                            log.error("Failure applying $msg to HAProxy config", ex)
+                        }
+                    }
+                    if (process.reload && process.reloadAt <= now()) {
+                        try {
+                            process.reload = reloadHaproxy(config, ports)
+                        } catch (ex) {
+                            log.error("Failure reloading HAProxy with new config", ex)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void scheduleHaproxyReload(process) {
+        if (!process.reload) {
+            process.reload = true
+            if (process.reloadAt < now()) process.reloadAt = now() + 1530
+        }
+    }
+
+    private void manageHaproxyPorts(msg, ports, process) {
+        switch (msg.op) {
+            case 'add':
+                if (ports[msg.port] != msg.host) {
+                    ports[msg.port] = msg.host
+                    scheduleHaproxyReload(process)
+                }
+                break
+
+            case 'del':
+                if (ports.containsKey(msg.port)) {
+                    ports.remove(msg.port)
+                    scheduleHaproxyReload(process)
+                } else
+                    log.warn("HAProxy manager were asked to remove nonexisting mapping $msg, we have $ports")
+                break
+        }
+    }
+
+    def haproxyHeaderTemplate = templateEngine.createTemplate('''
+        global
+                log /dev/log user info
+                maxconn 2000
+                daemon
+                pidfile $pidfile
+
+        defaults
+                log     global
+                mode    tcp
+                option  tcplog
+                retries 3
+                contimeout      5000
+                clitimeout      3600000
+                srvtimeout      3600000
+        '''.stripIndent())
+    def haproxyServiceTemplate = templateEngine.createTemplate('''
+        listen  service-$port 0.0.0.0:$port
+                dispatch $host:$port
+        '''.stripIndent())
+
+    private boolean generateHaproxyConfig(config, ports) {
+        def conf = new File(config.conf)
+        conf.withWriter { w ->
+            haproxyHeaderTemplate.make([ pidfile: config.pid ]).writeTo(w)
+            ports.each { port, host ->
+                haproxyServiceTemplate.make([ host: host, port: port ]).writeTo(w)
+            }
+        }
+    }
+
+    private boolean reloadHaproxy(config, ports) {
+        generateHaproxyConfig(config, ports)
+        // haproxy doesn't remove pid file on exit, but anyway
+        def pid = new File(config.pid)
+        String pids = pid.exists() ? pid.text.with { String p = it.trim().replaceAll('\\s+', ' '); p ?: null } : null
+        haproxyCmd("${config.bin} -f ${config.conf}" + (pids ? " -sf $pids" : ''))
+    }
+
+    private void stopHaproxy(config) {
+        def pid = new File(config.pid)
+        if (pid.exists()) haproxyCmd("kill ${pid.text.trim()}")
+    }
+
+    private boolean haproxyCmd(String cmd) {
+        log.info("executing `$cmd`")
+        def h = Runtime.runtime.exec(cmd)
+        int status = h.waitFor()
+        if (status > 0) {
+            String stdout = h.inputStream.text
+            String stderr = h.errorStream.text
+            log.error("`haproxy` failed with status $status\n\t$cmd\n$stderr\n$stdout")
+        }
+        status > 0
     }
 
     private Compute initGCE() {
@@ -436,6 +598,7 @@ class BrokerController {
     }
 
     private boolean docker(String cmd, Closure closure = null) {
+        log.debug("executing `$cmd`")
         def docker = Runtime.runtime.exec(cmd)
         int status = docker.waitFor()
         if (status > 0) {
@@ -443,7 +606,7 @@ class BrokerController {
             String stderr = docker.errorStream.text
             if (cmd.startsWith('docker rm') && stderr.contains('No such container:'))
                 return false // not an error
-            String error = "`docker` failed with status $status\n\$ $cmd\n$stderr\n$stdout"
+            String error = "`docker` failed with status $status\n\t$cmd\n$stderr\n$stdout"
             render(status: 500, text: error)
         }
         else if (closure) closure(docker.inputStream.text)
@@ -451,6 +614,7 @@ class BrokerController {
     }
 
     private boolean fleet(String cmd, Closure closure = null) {
+        log.debug("executing `$cmd`")
         def fleetctl = Runtime.runtime.exec(cmd)
         int status = fleetctl.waitFor()
         if (status > 0) {
@@ -458,7 +622,7 @@ class BrokerController {
             String stderr = fleetctl.errorStream.text
             if (cmd ==~ /fleetctl.* destroy .+/ && stderr.contains('could not find Job'))
                 return false // not an error
-            String error = "`fleetctl` failed with status $status\n\$ $cmd\n$stderr\n$stdout"
+            String error = "`fleetctl` failed with status $status\n\t$cmd\n$stderr\n$stdout"
             render(status: 500, text: error)
         }
         else if (closure) closure(fleetctl.inputStream.text)
@@ -552,6 +716,7 @@ class BrokerController {
             // TODO verify ports collected are integers, but not some errors
             String tmpdir = System.getProperty('java.io.tmpdir')
             def unitParams = [
+                cloud: cloud,
                 service: container,
                 docker_args: args,
                 docker_ports_mapping: ports.collect { p -> "-p ${p.mapped}:${p.native_}" } .join(' '),
@@ -586,7 +751,6 @@ class BrokerController {
         }
     }
 
-    def templateEngine = new SimpleTemplateEngine()
     def unitTemplate = templateEngine.createTemplate('''
         [Unit]
         Description=$service
@@ -608,9 +772,15 @@ class BrokerController {
 
         [Service]
         # let sleep to allow Docker container to start properly
-        ExecStart=/bin/sh -c 'zone=\\$(curl -s http://metadata/computeMetadata/v1/instance/zone -H "X-Google-Metadata-Request: true" | cut -d/ -f4); \
+        ExecStart=/bin/sh -c 'set -e; \
+            case $cloud in \
+                gce) zone=\\$(curl -s http://metadata/computeMetadata/v1/instance/zone -H "X-Google-Metadata-Request: true" | cut -d/ -f4);; \
+                aws) zone=\\$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone);; \
+                *) zone=local;; \
+            esac; \
             sleep 3; while :; do etcdctl set $etcd_prefix/$service \\$zone/%H/$etcd_ports_mapping --ttl 61; sleep 47; done'
         ExecStop=/usr/bin/etcdctl rm $etcd_prefix/$service
+        Restart=always
 
         [X-Fleet]
         X-ConditionMachineOf=${service}.service

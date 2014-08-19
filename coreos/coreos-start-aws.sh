@@ -2,7 +2,7 @@
 
 region=us-west-1
 stack=coreos-5
-command_host=54.201.191.184/32
+command_host=172.31.28.249/32
 
 set -e
 
@@ -23,6 +23,7 @@ sed -e "s|{{cluster_token}}|$cluster_token|" < cloud-config.yml |
 # must use 'public_ipv4' but then we have troubles connecting within cluster as nodes want to use public IP
 # and that is not allowed by our security group
 #   sed -e 's/private_ipv4:/public_ipv4:/'
+# so, currently cluster users must live in the same region to be able to use private addresses to connect
 
 aws --region $region cloudformation create-stack \
   --stack-name $stack \
