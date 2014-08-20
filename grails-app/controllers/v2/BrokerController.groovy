@@ -6,6 +6,7 @@ import groovy.sql.Sql
 import groovy.text.SimpleTemplateEngine
 import groovyx.gpars.actor.Actor
 import static groovyx.gpars.actor.Actors.actor
+import static groovyx.gpars.scheduler.Timer.timer
 import java.util.concurrent.TimeUnit
 import javax.servlet.http.HttpServletRequest
 import wslite.rest.ContentType
@@ -295,16 +296,15 @@ class BrokerController {
                 services[msg.service] = [ ports: ports, etcdIndex: msg.etcdIndex ]
 
                 if (pending[msg.service]) {
-                    pending[msg.service].each { req -> req.sender << mapping(ports, req.port).mapped }
+                    def replies = pending[msg.service].collectEntries { req -> [req.sender, mapping(ports, req.port).mapped] }
                     pending.remove(msg.service)
+                    timer.schedule({ replies.each { r, port -> r << port } }, 5, TimeUnit.SECONDS)
                 }
                 break
 
             case 'del':
                 // wait a little bit for 'add' to arrive
-                groovyx.gpars.scheduler.Timer.timer.schedule(
-                    { this.services << [ op: 'try-del', service: msg.service, etcdIndex: msg.etcdIndex ] },
-                    57, TimeUnit.SECONDS)
+                timer.schedule({ this.services << [ op: 'try-del', service: msg.service, etcdIndex: msg.etcdIndex ] }, 57, TimeUnit.SECONDS)
                 break
 
             case 'try-del':
