@@ -831,7 +831,8 @@ class BrokerController {
                         mysql.execute("create database $db default character set utf8 default collate utf8_general_ci".toString())
                         mysql.execute("grant all privileges on $db.* to $user identified by '$pass'".toString())
                     }
-                    creds = [ uri: "mysql://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db ]
+                    creds = [ uri: "mysql://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db,
+                              jdbcUrl: "jdbc:mysql://$ip:$port/$db?user=$user&password=$pass" ]
                     break
 
                 case 'postgresql':
@@ -839,7 +840,8 @@ class BrokerController {
                         pg.execute("create user $user password '$pass'".toString())
                         pg.execute("create database $db owner $user template template0 encoding = 'UNICODE'".toString())
                     }
-                    creds = [ uri: "postgresql://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db ]
+                    creds = [ uri: "postgresql://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db,
+                              jdbcUrl: "jdbc:postgresql://$ip:$port/$db?user=$user&password=$pass" ]
                     break
 
                 case 'mongodb':
