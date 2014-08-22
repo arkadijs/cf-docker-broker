@@ -78,6 +78,7 @@ class BrokerController {
         cloud = c.cloud
         cloudGCE = cloud == 'gce'
         if (coreos) {
+            log.info('Initializing CoreOS interface...')
             if (!c.coreoshost) throw new RuntimeException('`broker.v2.coreoshost` must be set if broker.v2.backend = coreos')
             haproxy = c.forwarder == 'haproxy' ?: c.forwarder == 'gce' ? false : { throw new IllegalArgumentException('`broker.v2.forwarder` must be one of: haproxy, gce') }()
             if (haproxy) {
@@ -101,6 +102,7 @@ class BrokerController {
             portmap = managePorts()
             services = watchServices()
             discoverer = Thread.startDaemon('ETCD Watcher') { watchEtcd() }
+            log.info('CoreOS interface initialized')
         } else { // docker
             ip = myIp(c.publicip)
         }
@@ -110,10 +112,12 @@ class BrokerController {
     @javax.annotation.PreDestroy
     void shutdown() {
         if (coreos) {
+            log.info('Shutting down CoreOS interface...')
             if (discoverer) discoverer.with { interrupt(); join() }
             if (services)     services.with { stop(); join() }
             if (haproxyd)     haproxyd.with { stop(); join() }
             if (portmap)       portmap.with { stop(); join() }
+            log.info('CoreOS interface down')
         }
     }
 
@@ -444,7 +448,7 @@ class BrokerController {
             reloadAt: now() + (new File(config.pid).exists() ? 60000 : 0)
         ]
         actor {
-            if (config.stoponexit) delegate.metaClass.onStop = { stopHaproxy(config) }
+            if (config.stoponexit) delegate.metaClass.onStop = { stopHaproxy(config) } // TODO doesn't work
             loop {
                 react(1570) { msg ->
                     if (msg == Actor.TIMEOUT) {
@@ -845,9 +849,19 @@ class BrokerController {
                     break
 
                 case 'mongodb':
-                    // TODO create database and credentials
-                    // 'root' user is user manager - cannot manipulate data, must create dbOwner in db when bound to app
-                    creds = [ uri: "mongodb://$ip:$port", host: ip, port: port, username: 'root', password: adminPass ]
+                    // 'root' user is user manager - cannot manipulate data
+                    // create dbOwner in db when bound to app
+                    def mongo = new com.mongodb.MongoClient(
+                        new com.mongodb.ServerAddress(ip, port),
+                        [com.mongodb.MongoCredential.createMongoCRCredential('root', 'admin', adminPass.chars)],
+                        new com.mongodb.MongoClientOptions.Builder().writeConcern(com.mongodb.WriteConcern.JOURNALED).build())
+                    // db.createUser({ user: '$user', pwd: '$pass', roles: [ 'dbOwner' ] })
+                    def create = new com.mongodb.BasicDBObjectBuilder()
+                        .add('createUser', user).add('pwd', pass).add('roles', new com.mongodb.BasicDBList().with { add('dbOwner'); it })
+                        .get()
+                    mongo.getDB(db).command(create).throwOnError()
+                    mongo.close()
+                    creds = [ uri: "mongodb://$ip:$port/$db", host: ip, port: port, username: user, password: pass ]
                     break
 
                 case 'rabbitmq':
