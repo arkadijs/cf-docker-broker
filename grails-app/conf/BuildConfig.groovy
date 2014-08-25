@@ -41,6 +41,7 @@ grails.project.dependency.resolution = {
         mavenLocal()
         grailsCentral()
         mavenCentral()
+        mavenRepo 'https://code.lds.org/nexus/content/groups/main-repo'
         // uncomment these (or add new ones) to enable remote dependency resolution from public Maven repositories
         //mavenRepo "http://repository.codehaus.org"
         //mavenRepo "http://download.java.net/maven/2/"
@@ -51,6 +52,7 @@ grails.project.dependency.resolution = {
         // specify dependencies here under either 'build', 'compile', 'runtime', 'test' or 'provided' scopes e.g.
         runtime 'mysql:mysql-connector-java:5.1.31'
         runtime 'org.postgresql:postgresql:9.3-1102-jdbc41'
+        runtime 'com.oracle:ojdbc6:11.2.0.3' // ojdbc7:12.1.0.1 craps out with ORA-01882: timezone region not found
         compile 'org.mongodb:mongo-java-driver:2.12.3'
         compile 'com.github.groovy-wslite:groovy-wslite:1.1.0'
         compile 'org.codehaus.gpars:gpars:1.2.1'

@@ -24,6 +24,7 @@ class BrokerController {
     final String mariaId = '45e953d3-1598-4b54-95c9-16427e5e7059'
     final String pgId    = 'f80271a3-0c58-4c23-a550-8828fcce63ad'
     final String mongoId = '1050698f-be8e-43ac-a3f2-a74eaec714de'
+    final String oraId   = '1816c23f-6506-4704-959f-ee747ae6a06c'
     final String rmqId   = '302e9f58-106b-40c0-8bad-8a593bcc2243'
     final def plans = [
         (redisId): [ service: 'redis',      ports: [ [ port: 6379,  kind: 'api' ] ] ],
@@ -31,6 +32,8 @@ class BrokerController {
         (mariaId): [ service: 'maria',      ports: [ [ port: 3306,  kind: 'api' ] ] ],
         (pgId):    [ service: 'postgresql', ports: [ [ port: 5432,  kind: 'api' ] ] ],
         (mongoId): [ service: 'mongodb',    ports: [ [ port: 27017, kind: 'api' ] ] ],
+        (oraId):   [ service: 'oracle',     ports: [ [ port: 1521,  kind: 'api' ], // [ port: 22, kind: 'ssh' ],
+            [ port:  8080, kind: 'management', dashboard: 'http://$ip:$port/apex' ] ] ],
         (rmqId):   [ service: 'rabbitmq',   ports: [ [ port: 5672,  kind: 'api' ],
             // dashboard url stolen from https://github.com/nimbus-cloud/cf-rabbitmq-broker/blob/master/rabbitmq/service.go#L121
             [ port: 15672, kind: 'management', dashboard: 'http://$ip:$port/#/login/admin/$pass' ] ] ] ]
@@ -595,6 +598,7 @@ class BrokerController {
                     [ id: mariaId, name: 'maria',      description: 'MariaDB database',metadata: [ displayName: 'MariaDB Galera Cluster', bullets: [ 'MariaDB 10.0.12','2 nodes / 1GB memory pool each', '10GB XtraDB storage' ], costs: [ [ amount: [ usd: 20 ],   unit: 'month' ] ] ] ],
                     [ id: pgId,    name: 'postgresql', description: 'PostgreSQL database',         metadata: [ displayName: 'PostgreSQL', bullets: [ 'PostgreSQL 9.3', '1GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ],
                     [ id: mongoId, name: 'mongodb',    description: 'MongoDB NoSQL database',      metadata: [ displayName: 'MongoDB',    bullets: [ 'MongoDB 2.6',    '1GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0.02 ], unit: 'hour'  ] ] ] ],
+                    [ id: oraId,   name: 'oracle',     description: 'Oracle database',             metadata: [ displayName: 'Oracle',     bullets: [ 'Oracle 11gR2 XE','1GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ],
                     [ id: rmqId,   name: 'rabbitmq',   description: 'RabbitMQ messaging broker',   metadata: [ displayName: 'RabbitMQ',   bullets: [ 'RabbitMQ 3.3',   '1GB persistence' ],                                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ]
                 ]
             ] ] ]
@@ -704,6 +708,7 @@ class BrokerController {
             case 'postgresql': args = 'postgres'; break // TODO introduce image that has password setup for postgres admin user
             case 'mongodb':    args = "-e MONGOD_OPTIONS=\"--nojournal --smallfiles --noprealloc --auth\" -e MONGO_ROOT_PASSWORD=$pass arkadi/mongodb"; break
           //case 'mongodb':    args = 'mongo mongod --nojournal --smallfiles --noprealloc'; break -- _/mongo image has no admin password
+            case 'oracle':     args = "alexeiled/docker-oracle-xe-11g"; break
             case 'rabbitmq':   args = "-e RABBITMQ_PASS=$pass tutum/rabbitmq"; break
             default:
                 render(status: 404, text: "No '${plan.service}' plan accepted here")
@@ -808,6 +813,7 @@ class BrokerController {
 
     final String mydrv = 'com.mysql.jdbc.Driver'
     final String pgdrv = 'org.postgresql.Driver'
+    final String oradrv = 'oracle.jdbc.OracleDriver'
 
     def bind() {
         if (check(request)) return
@@ -862,6 +868,17 @@ class BrokerController {
                     mongo.getDB(db).command(create).throwOnError()
                     mongo.close()
                     creds = [ uri: "mongodb://$ip:$port/$db", host: ip, port: port, username: user, password: pass ]
+                    break
+
+                case 'oracle':
+                    db = user
+                    pass = pass.substring(0, 16)
+                    Sql.withInstance("jdbc:oracle:thin:@$ip:$port:xe", 'system', 'oracle', oradrv) { Sql ora ->
+                        ora.execute("create user $user identified by $pass default tablespace users temporary tablespace temp".toString())
+                        ora.execute("grant connect, resource, unlimited tablespace to $user".toString())
+                    }
+                    creds = [ uri: "oracle://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db,
+                              jdbcUrl: "jdbc:oracle:thin:$user/$pass@$ip:$port:xe" ]
                     break
 
                 case 'rabbitmq':

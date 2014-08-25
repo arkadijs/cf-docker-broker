@@ -33,6 +33,7 @@ coreos:
         ExecStart=/usr/bin/docker pull mysql:latest
         ExecStart=/usr/bin/docker pull postgres:latest
         ExecStart=/usr/bin/docker pull arkadi/mongodb:latest
+        ExecStart=/usr/bin/docker pull alexeiled/docker-oracle-xe-11g:latest
         ExecStart=/usr/bin/docker pull tutum/rabbitmq:latest
         ExecStart=/usr/bin/docker pull ubuntu:latest
         ExecStart=/usr/bin/docker pull ubuntu-upstart:latest
@@ -46,6 +47,7 @@ coreos:
         [Unit]
         Description=Formats the swap drive
         Requires=dev-sdb.device
+        After=dev-sdb.device
         [Service]
         Type=oneshot
         RemainAfterExit=yes

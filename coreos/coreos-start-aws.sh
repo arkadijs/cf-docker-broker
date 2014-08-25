@@ -1,7 +1,7 @@
 #!/bin/sh
 
 region=us-west-1
-stack=coreos-5
+stack=coreos-6
 command_host=172.31.28.249/32
 
 set -e
@@ -45,7 +45,7 @@ while :; do
     status=$(aws --region $region cloudformation describe-stack-resource --stack $stack --logical-resource-id $autoscaling_group 2>&1 | grep ResourceStatus)
     if test -n "$status"; then
         if echo "$status" | grep CREATE_COMPLETE; then break; fi
-        if echo "$status" | grep -v CREATE_; then problem; fi
+        if echo "$status" | grep -Ev '(CREATE_|Resource creation Initiated)'; then problem; fi
     fi
     i=$(($i+1))
     if test $i -gt $retry_count; then problem; fi

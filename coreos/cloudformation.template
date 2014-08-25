@@ -117,6 +117,10 @@
       "Properties": {
         "ImageId" : { "Fn::FindInMap" : [ "RegionMap", { "Ref" : "AWS::Region" }, "AMI" ]},
         "InstanceType": {"Ref": "InstanceType"},
+        "BlockDeviceMappings": [{
+            "DeviceName": "/dev/xvda",
+            "Ebs" : {"VolumeSize": "20"}
+        }],
         "KeyName": {"Ref": "KeyPair"},
         "SecurityGroups": [{"Ref": "CoreOSSecurityGroup"}],
         "UserData" : {"Ref": "CloudConfig"}
