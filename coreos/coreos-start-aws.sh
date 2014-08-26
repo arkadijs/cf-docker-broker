@@ -1,7 +1,7 @@
 #!/bin/sh
 
 region=us-west-1
-stack=coreos-6
+stack=coreos-7
 command_host=172.31.28.249/32
 
 set -e
@@ -14,7 +14,8 @@ retry_count=10
 cloud_config=$(mktemp)
 cluster_token=$(curl -sS https://discovery.etcd.io/new)
 sed -e "s|{{cluster_token}}|$cluster_token|" < cloud-config.yml |
-  sed -re "s/(metadata:).*/\\1 region=$region/" > $cloud_config
+  sed -re "s/(metadata:).*/\\1 region=$region/" |
+  sed -re 's|([/-])sdb|\1xvdb|g' > $cloud_config
 
 # TODO 'fleetctl' works, but 'etcdctl' does not
 #   $ etcdctl --debug ls /
