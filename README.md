@@ -73,11 +73,7 @@ Login to CloudFoundry and setup initial space:
 Register broker with CloudFoundry and make it's plans public:
 
     $ cf create-service-broker docker a b http://broker-vm:8080
-    $ for p in $(cf curl /v2/service_plans -X 'GET' |grep '"guid"' |cut -d\" -f4); do
-        cf curl /v2/service_plans/$p -X 'PUT' -d '{"public":true}';
-     done
-
-[Resolved](https://www.pivotaltracker.com/s/projects/892938/stories/57752202) at 08/08/14. ~~(Somebody, tell me, why we need the PUT stanza instead of nice `cf service-plan` command or something?)~~
+    $ cf enable-service-access docker
 
 #### Internals
 
