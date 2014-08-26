@@ -875,8 +875,8 @@ class BrokerController {
                     db = user
                     pass = pass.substring(0, 16)
                     Sql.withInstance("jdbc:oracle:thin:@$ip:$port:xe", 'system', 'oracle', oradrv) { Sql ora ->
-                        ora.execute("create user $user identified by $pass default tablespace users temporary tablespace temp".toString())
-                        ora.execute("grant connect, resource, unlimited tablespace to $user".toString())
+                        ora.execute("create user $user identified by $pass default tablespace users temporary tablespace temp quota unlimited on users".toString())
+                        ora.execute("grant connect, resource to $user".toString())
                     }
                     creds = [ uri: "oracle://$ip:$port/$db", host: ip, port: port, username: user, password: pass, database: db,
                               jdbcUrl: "jdbc:oracle:thin:$user/$pass@$ip:$port:xe" ]
