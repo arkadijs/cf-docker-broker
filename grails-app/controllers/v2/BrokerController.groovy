@@ -721,6 +721,7 @@ class BrokerController {
                 String error = "Error allocating forwarding ports"
                 log.error("$error $ports")
                 render(status: 500, text: error)
+                return
             }
             // TODO verify ports collected are integers, but not some errors
             String tmpdir = System.getProperty('java.io.tmpdir')
