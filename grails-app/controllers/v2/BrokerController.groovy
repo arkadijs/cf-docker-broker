@@ -607,14 +607,15 @@ class BrokerController {
 
     private boolean docker(String cmd, Closure closure = null) {
         log.debug("executing `$cmd`")
-        def docker = Runtime.runtime.exec(cmd)
+        def _cmd = (cmd =~ /([^"]\S*|".+?")\s*/).collect { _, arg -> arg.replace('"', '') } as String[]
+        def docker = Runtime.runtime.exec(_cmd)
         int status = docker.waitFor()
         if (status > 0) {
             String stdout = docker.inputStream.text
             String stderr = docker.errorStream.text
             if (cmd.startsWith('docker rm') && stderr.contains('No such container:'))
                 return false // not an error
-            String error = "`docker` failed with status $status\n\t$cmd\n$stderr\n$stdout"
+            String error = "`docker` failed with status $status\n\t$cmd\n\t$_cmd\n$stderr\n$stdout"
             render(status: 500, text: error)
         }
         else if (closure) closure(docker.inputStream.text)
@@ -706,7 +707,7 @@ class BrokerController {
             case 'mysql':      args = "-e MYSQL_ROOT_PASSWORD=$pass mysql"; break
             case 'maria':      args = "-e MARIA_ROOT_PASSWORD=$pass arkadi/mariadb"; break
             case 'postgresql': args = 'postgres'; break // TODO introduce image that has password setup for postgres admin user
-            case 'mongodb':    args = "-e MONGOD_OPTIONS=\"--nojournal --smallfiles --noprealloc --auth\" -e MONGO_ROOT_PASSWORD=$pass arkadi/mongodb"; break
+            case 'mongodb':    args = "-e \"MONGOD_OPTIONS=--nojournal --smallfiles --noprealloc --auth\" -e MONGO_ROOT_PASSWORD=$pass arkadi/mongodb"; break
           //case 'mongodb':    args = 'mongo mongod --nojournal --smallfiles --noprealloc'; break -- _/mongo image has no admin password
             case 'oracle':     args = "alexeiled/docker-oracle-xe-11g"; break
             case 'rabbitmq':   args = "-e RABBITMQ_PASS=$pass tutum/rabbitmq"; break
