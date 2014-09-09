@@ -613,7 +613,7 @@ class BrokerController {
         if (status > 0) {
             String stdout = docker.inputStream.text
             String stderr = docker.errorStream.text
-            if (cmd.startsWith('docker rm') && stderr.contains('No such container:'))
+            if (cmd =~ /^docker (rm|stop) / && stderr.contains('No such container:'))
                 return false // not an error
             String error = "`docker` failed with status $status\n\t$cmd\n\t$_cmd\n$stderr\n$stdout"
             render(status: 500, text: error)
