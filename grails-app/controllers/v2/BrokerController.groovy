@@ -204,7 +204,10 @@ class BrokerController {
                     log.error('ETCD watch request completed with error', ex)
                     index = -1
                 }
-                if (change?.statusCode != 200) continue
+                if (change?.statusCode != 200) {
+                    Thread.sleep(tm)
+                    continue
+                }
                 def j = change.json
                 if (!j.node.key.startsWith(etcdServices + '/')) continue
                 index = (j.node.modifiedIndex as long) + 1
