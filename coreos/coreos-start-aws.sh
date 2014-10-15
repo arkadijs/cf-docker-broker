@@ -54,10 +54,7 @@ while :; do
     sleep $retry_delay
 done
 
-first_node=$(aws --region $region ec2 describe-instances --filters "Name=tag-value,Values=$stack" |
-  grep PublicDnsName |
-  sed -re 's/.*PublicDnsName.*(ec2-.+\.compute\.amazonaws\.com).*/\1/' |
-  head -1)
+first_node=$(aws --region $region ec2 describe-instances --filters "Name=tag-value,Values=$stack" --output text --query 'Reservations[0].Instances[0].PublicDnsName')
 
 echo "\nCoreOS cluster is ready!"
 echo "Do 'export FLEETCTL_ENDPOINT=http://$first_node:4001' now."
