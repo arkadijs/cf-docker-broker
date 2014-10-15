@@ -3,8 +3,7 @@ zone=europe-west1-a
 machine_type=g1-small
 index=3
 nr_nodes=3
-#image=coreos-alpha-394-0-0-v20140801
-image=coreos-stable-367-1-0-v20140724
+image=coreos-stable-444-4-0-v20141010
 
 set -e
 reserved_ip_name=core$index-services
