@@ -2,7 +2,7 @@ region=europe-west1
 zone=europe-west1-a
 machine_type=g1-small
 index=3
-nr_nodes=3
+nr_nodes=5
 image=coreos-stable-444-4-0-v20141010
 
 set -e
