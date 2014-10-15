@@ -188,7 +188,7 @@ class BrokerController {
                 try {
                     change = etcd.get(path: etcdServices, query: [ wait: true, recursive: true] + (index > 0 ? [ waitIndex: index ] : [:]))
                 } catch (wslite.rest.RESTClientException ex) {
-                    if (ex.cause instanceof SocketTimeoutException) continue
+                    if (ex.cause?.cause instanceof SocketTimeoutException) continue
                     if (ex.response?.statusCode == 400) { // TODO register ETCD issue - it should be 410 Gone
                         // handle 'outdated' error due to no changes under /services
                         //   HTTP/1.1 400 Bad Request
