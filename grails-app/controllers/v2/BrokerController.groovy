@@ -461,7 +461,7 @@ class BrokerController {
                         // do nothing
                     } else {
                         try {
-                            manageHaproxyPorts(msg, ports, process)
+                            manageHaproxyPorts(config, msg, ports, process)
                         } catch (ex) {
                             log.error("Failure applying $msg to HAProxy config", ex)
                         }
@@ -485,7 +485,7 @@ class BrokerController {
         }
     }
 
-    private void manageHaproxyPorts(msg, ports, process) {
+    private void manageHaproxyPorts(config, msg, ports, process) {
         switch (msg.op) {
             case 'add':
                 if (ports[msg.port] != msg.host) {
@@ -497,7 +497,10 @@ class BrokerController {
             case 'del':
                 if (ports.containsKey(msg.port)) {
                     ports.remove(msg.port)
-                    scheduleHaproxyReload(process)
+                    if (ports)
+                        scheduleHaproxyReload(process)
+                    else
+                        stopHaproxy(config)
                 } else
                     log.warn("HAProxy manager were asked to remove nonexisting mapping $msg, we have $ports")
                 break
@@ -545,7 +548,10 @@ class BrokerController {
 
     private void stopHaproxy(config) {
         def pid = new File(config.pid)
-        if (pid.exists()) haproxyCmd("kill ${pid.text.trim()}")
+        if (pid.exists()) {
+            haproxyCmd("kill ${pid.text.trim()}")
+            pid.delete()
+        }
     }
 
     private boolean haproxyCmd(String cmd) {
