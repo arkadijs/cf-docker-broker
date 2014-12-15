@@ -1,5 +1,6 @@
 package v2
 
+import com.datastax.driver.core.Cluster
 import com.google.api.services.compute.Compute
 import com.google.api.services.compute.model.*
 import groovy.sql.Sql
@@ -24,6 +25,7 @@ class BrokerController {
     final String mariaId = '45e953d3-1598-4b54-95c9-16427e5e7059'
     final String pgId    = 'f80271a3-0c58-4c23-a550-8828fcce63ad'
     final String mongoId = '1050698f-be8e-43ac-a3f2-a74eaec714de'
+    final String cassId  = 'f6cc9ce6-ae3a-43cd-9ae0-ca45280bcc6e'
     final String oraId   = '1816c23f-6506-4704-959f-ee747ae6a06c'
     final String rmqId   = '302e9f58-106b-40c0-8bad-8a593bcc2243'
     final def plans = [
@@ -32,6 +34,7 @@ class BrokerController {
         (mariaId): [ service: 'maria',      ports: [ [ port: 3306,  kind: 'api' ] ] ],
         (pgId):    [ service: 'postgresql', ports: [ [ port: 5432,  kind: 'api' ] ] ],
         (mongoId): [ service: 'mongodb',    ports: [ [ port: 27017, kind: 'api' ] ] ],
+        (cassId):  [ service: 'cassandra',  ports: [ [ port: 9042,  kind: 'api' ] ] ],
         (oraId):   [ service: 'oracle',     ports: [ [ port: 1521,  kind: 'api' ], // [ port: 22, kind: 'ssh' ],
             [ port:  8080, kind: 'management', dashboard: 'http://$ip:$port/apex' ] ] ],
         (rmqId):   [ service: 'rabbitmq',   ports: [ [ port: 5672,  kind: 'api' ],
@@ -607,6 +610,7 @@ class BrokerController {
                     [ id: mariaId, name: 'maria',      description: 'MariaDB database',metadata: [ displayName: 'MariaDB Galera Cluster', bullets: [ 'MariaDB 10.0.12','2 nodes / 1GB memory pool each', '10GB XtraDB storage' ], costs: [ [ amount: [ usd: 20 ],   unit: 'month' ] ] ] ],
                     [ id: pgId,    name: 'postgresql', description: 'PostgreSQL database',         metadata: [ displayName: 'PostgreSQL', bullets: [ 'PostgreSQL 9.3', '1GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ],
                     [ id: mongoId, name: 'mongodb',    description: 'MongoDB NoSQL database',      metadata: [ displayName: 'MongoDB',    bullets: [ 'MongoDB 2.6',    '1GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0.02 ], unit: 'hour'  ] ] ] ],
+                    [ id: cassId,  name: 'cassandra',  description: 'Cassandra NoSQL database',    metadata: [ displayName: 'Cassandra',  bullets: [ 'Cassandra 2.1',  '2GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ],
                     [ id: oraId,   name: 'oracle',     description: 'Oracle database',             metadata: [ displayName: 'Oracle',     bullets: [ 'Oracle 11gR2 XE','1GB memory pool', '10GB storage' ],                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ],
                     [ id: rmqId,   name: 'rabbitmq',   description: 'RabbitMQ messaging broker',   metadata: [ displayName: 'RabbitMQ',   bullets: [ 'RabbitMQ 3.3',   '1GB persistence' ],                                       costs: [ [ amount: [ usd: 0 ],    unit: 'month' ] ] ] ]
                 ]
@@ -718,6 +722,7 @@ class BrokerController {
             case 'postgresql': args = 'postgres'; break // TODO introduce image that has password setup for postgres admin user
             case 'mongodb':    args = "-e \"MONGOD_OPTIONS=--nojournal --smallfiles --noprealloc --auth\" -e MONGO_ROOT_PASSWORD=$pass arkadi/mongodb"; break
           //case 'mongodb':    args = 'mongo mongod --nojournal --smallfiles --noprealloc'; break -- _/mongo image has no admin password
+            case 'cassandra':  args = "arkadi/cassandra"; break // based on poklet/cassandra but with PasswordAuthenticator and CassandraAuthorizer
             case 'oracle':     args = "alexeiled/docker-oracle-xe-11g"; break
             case 'rabbitmq':   args = "-e RABBITMQ_PASS=$pass tutum/rabbitmq"; break
             default:
@@ -881,6 +886,19 @@ class BrokerController {
                     creds = [ uri: "mongodb://$ip:$port/$db", host: ip, port: port, username: user, password: pass ]
                     break
 
+                case 'cassandra':
+                    def (cluster, cass) = cassandra(ip, port, adminPass)
+                    try {
+                        cass.execute("create keyspace $db with replication = {'class': 'SimpleStrategy', 'replication_factor': 1}")
+                        cass.execute("create user $user with password '$pass'")
+                        cass.execute("grant all on keyspace $db to $user")
+                    } finally {
+                        cass.closeAsync()
+                        cluster.closeAsync()
+                    }
+                    creds = [ uri: "cassandra://$ip:$port/$db", host: ip, port: port, username: user, password: pass ]
+                    break
+
                 case 'oracle':
                     db = user
                     pass = pass.substring(0, 16)
@@ -909,6 +927,25 @@ class BrokerController {
             }
 
             if (creds) say(201) { [ credentials: creds ] }
+        }
+    }
+
+    def cassandra(String ip, int port, String adminPass) {
+        // http://www.datastax.com/drivers/java/2.0/com/datastax/driver/core/Cluster.Builder.html#addContactPointsWithPorts(java.util.Collection)
+        // ... if the Cassandra nodes are behind a router and are not accessed directly. Note that if you are in this situation (Cassandra nodes
+        // are behind a router, not directly accessible), you almost surely want to provide a specific AddressTranslater (through
+        // withAddressTranslater(com.datastax.driver.core.policies.AddressTranslater)) to translate actual Cassandra node addresses to the
+        // addresses the driver should use, otherwise the driver will not be able to auto-detect new nodes (and will generally not function optimally).
+        def builder = Cluster.builder().addContactPointsWithPorts([new java.net.InetSocketAddress(ip, port)])
+        def cluster = builder.withCredentials('cassandra', adminPass).build()
+        try {
+            [cluster, cluster.connect()]
+        } catch (e) {
+            log.info('Cannot authenticate as `cassandra` user, assuming default password must be changed: ' + e.message)
+            cluster = builder.withCredentials('cassandra', 'cassandra').build()
+            def cass = cluster.connect()
+            cass.execute("alter user cassandra with password '$adminPass'")
+            [cluster, cass]
         }
     }
 

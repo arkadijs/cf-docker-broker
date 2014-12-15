@@ -54,6 +54,7 @@ grails.project.dependency.resolution = {
         runtime 'org.postgresql:postgresql:9.3-1102-jdbc41'
         runtime 'com.oracle:ojdbc6:11.2.0.3' // ojdbc7:12.1.0.1 craps out with ORA-01882: timezone region not found
         compile 'org.mongodb:mongo-java-driver:2.12.3'
+        compile 'com.datastax.cassandra:cassandra-driver-mapping:2.1.2'
         compile 'com.github.groovy-wslite:groovy-wslite:1.1.0'
         compile 'org.codehaus.gpars:gpars:1.2.1'
         compile 'com.google.apis:google-api-services-compute:v1-rev29-1.19.0'
