@@ -77,7 +77,7 @@ Register broker with CloudFoundry and make it's plans public:
 
 #### Internals
 
-Alpha quality software ahead.
+Beta quality software ahead.
 
 The broker is almost stateless and, with some help, will hopefully recover from many errors. Fairly minimal amount of state is kept in ETCD: free port management, try `etcdctl ls /cf-docker-broker/ports`. Services (containers) are published under `/cf-docker-broker/services`. Broker does not write this sub-tree, only listen for changes.
 
